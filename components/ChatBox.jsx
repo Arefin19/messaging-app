@@ -22,6 +22,7 @@ import { db, auth, storage } from '../firebaseconfig';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import getOtherUser from '../utlis/getOtherUser';
+import { getUserProfilePicture, handleProfilePictureError } from '../utlis/profilePicture';
 
 // Simple emoji picker component
 const EmojiPicker = ({ onEmojiSelect, onClose, isVisible }) => {
@@ -119,6 +120,10 @@ const Message = ({ sender, text, time, isSameSender, isLastMessage, userPhoto, o
                 src={otherUserPhoto}
                 alt="Profile"
                 className="w-8 h-8 rounded-full object-cover"
+                onError={(e) => {
+                  // Fallback to generic avatar
+                  e.target.src = `https://ui-avatars.com/api/?name=U&background=4F46E5&color=fff&size=32`;
+                }}
               />
             ) : (
               <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium">
@@ -209,21 +214,6 @@ const ChatBox = () => {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
-
-  // Function to get user profile picture with fallback
-  const getUserProfilePicture = (user) => {
-    if (!user) return null;
-    
-    if (user.photoURL && user.photoURL.trim() !== '') {
-      return user.photoURL;
-    }
-    
-    const initial = user.displayName ? 
-      user.displayName.charAt(0).toUpperCase() : 
-      user.email.charAt(0).toUpperCase();
-    
-    return `https://ui-avatars.com/api/?name=${initial}&background=random&color=fff&size=32`;
-  };
 
   const handleSend = async () => {
     const trimmedText = textBox?.trim() || '';
@@ -384,7 +374,7 @@ const ChatBox = () => {
   }
 
   const otherUserEmail = getOtherUser(chat.users, user?.email || '');
-  const currentUserProfilePic = getUserProfilePicture(user);
+  const currentUserProfilePic = getUserProfilePicture(user, 32);
 
   return (
     <section className='bg-gray-100 dark:bg-gray-800 relative flex flex-col rounded-xl h-full shadow-lg w-full text-left'>
@@ -407,12 +397,7 @@ const ChatBox = () => {
               src={currentUserProfilePic}
               alt="Profile"
               className="w-10 h-10 rounded-full object-cover border-2 border-blue-400"
-              onError={(e) => {
-                const initial = user?.displayName ? 
-                  user.displayName.charAt(0).toUpperCase() : 
-                  user?.email.charAt(0).toUpperCase();
-                e.target.src = `https://ui-avatars.com/api/?name=${initial}&background=4F46E5&color=fff&size=40`;
-              }}
+              onError={(e) => handleProfilePictureError(e, user, 40)}
             />
             <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-700"></div>
           </div>

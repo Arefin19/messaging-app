@@ -1,3 +1,4 @@
+// 1. Enhanced Login.jsx with detailed debugging
 import React, { useState } from 'react';
 import Head from 'next/head';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -17,38 +18,68 @@ const Login = () => {
     const [error, setError] = useState(null);
     const [isLogin, setIsLogin] = useState(true);
     const [isLoading, setIsLoading] = useState(false);
+    const [debugInfo, setDebugInfo] = useState('');
     const router = useRouter();
+
+    const addDebugInfo = (info) => {
+        console.log('DEBUG:', info);
+        setDebugInfo(prev => prev + '\n' + info);
+    };
 
     const handleAuth = async (e) => {
         e.preventDefault();
         setError(null);
+        setDebugInfo('');
         setIsLoading(true);
         
         try {
             if (isLogin) {
+                addDebugInfo('Attempting to login...');
                 await signInWithEmailAndPassword(auth, email, password);
+                addDebugInfo('Login successful');
                 router.push('/');
             } else {
+                addDebugInfo('Starting signup process...');
+                
                 // Create user
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
                 const user = userCredential.user;
+                addDebugInfo(`User created with UID: ${user.uid}`);
                 
                 // Upload profile picture if exists
                 let photoURL = null;
                 if (profilePic) {
                     try {
+                        addDebugInfo('Starting profile picture upload...');
+                        
+                        // Create a unique filename
+                        const timestamp = Date.now();
+                        const fileExtension = profilePic.name.split('.').pop();
+                        const fileName = `profile_${timestamp}.${fileExtension}`;
+                        
                         // Use the correct path that matches your Firebase Storage rules
-                        const storageRef = ref(storage, `profilePictures/${user.uid}/${profilePic.name}`);
-                        console.log('Uploading to path:', `profilePictures/${user.uid}/${profilePic.name}`);
+                        const storagePath = `profilePictures/${user.uid}/${fileName}`;
+                        const storageRef = ref(storage, storagePath);
+                        
+                        addDebugInfo(`Uploading to path: ${storagePath}`);
+                        addDebugInfo(`File size: ${(profilePic.size / 1024 / 1024).toFixed(2)}MB`);
+                        addDebugInfo(`File type: ${profilePic.type}`);
                         
                         const uploadResult = await uploadBytes(storageRef, profilePic);
-                        console.log('Upload successful:', uploadResult);
+                        addDebugInfo('Upload successful, getting download URL...');
                         
                         photoURL = await getDownloadURL(storageRef);
-                        console.log('Download URL:', photoURL);
+                        addDebugInfo(`Download URL obtained: ${photoURL}`);
+                        
+                        // Test if the URL is accessible
+                        const testImg = new Image();
+                        testImg.onload = () => addDebugInfo('Profile picture URL is accessible');
+                        testImg.onerror = () => addDebugInfo('ERROR: Profile picture URL is not accessible');
+                        testImg.src = photoURL;
+                        
                     } catch (uploadError) {
                         console.error('Error uploading profile picture:', uploadError);
-                        // Continue with account creation even if image upload fails
+                        addDebugInfo(`Upload error: ${uploadError.message}`);
                         setError('Account created but profile picture upload failed. You can update it later.');
                     }
                 }
@@ -56,21 +87,35 @@ const Login = () => {
                 // Create fallback avatar URL if no profile picture
                 const fallbackAvatarURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=4F46E5&color=fff&size=200`;
                 
+                const finalPhotoURL = photoURL || fallbackAvatarURL;
+                addDebugInfo(`Final photoURL: ${finalPhotoURL}`);
+                
                 // Update user profile with username and photo
                 await updateProfile(user, {
                     displayName: username,
-                    photoURL: photoURL || fallbackAvatarURL
+                    photoURL: finalPhotoURL
                 });
 
-                console.log('Profile updated with:', {
-                    displayName: username,
-                    photoURL: photoURL || fallbackAvatarURL
-                });
-
-                router.push('/');
+                addDebugInfo('Profile updated successfully');
+                
+                // Force refresh the user object to get updated profile
+                await user.reload();
+                const refreshedUser = auth.currentUser;
+                
+                addDebugInfo(`After reload - displayName: ${refreshedUser.displayName}`);
+                addDebugInfo(`After reload - photoURL: ${refreshedUser.photoURL}`);
+                
+                // Small delay to ensure profile is updated
+                setTimeout(() => {
+                    addDebugInfo('Redirecting to home page...');
+                    router.push('/');
+                }, 1000);
+                
+                return; // Don't redirect immediately
             }
         } catch (err) {
             console.error('Authentication error:', err);
+            addDebugInfo(`Auth error: ${err.message}`);
             setError(err.message);
         } finally {
             setIsLoading(false);
@@ -92,7 +137,7 @@ const Login = () => {
 
             console.log('Selected file:', file);
             setProfilePic(file);
-            setError(null); // Clear any previous errors
+            setError(null);
             
             // Create preview
             const reader = new FileReader();
@@ -107,6 +152,7 @@ const Login = () => {
     const switchAuthMode = () => {
         setIsLogin(!isLogin);
         setError(null);
+        setDebugInfo('');
         setUsername('');
         setProfilePic(null);
         setPreviewImage(null);
@@ -118,7 +164,7 @@ const Login = () => {
                 <title>Chat App | {isLogin ? 'Login' : 'Sign Up'}</title>
             </Head>
             <main className='w-full font-disp h-screen flex justify-center flex-col items-center bg-gradient-to-br from-mSec to-dSec'>
-                <div className='lg:px-20 lg:pb-12 px-10 py-8 bg-gray-700 text-white text-lg shadow-xl shadow-gray-800 rounded-3xl text-center'>
+                <div className='lg:px-20 lg:pb-12 px-10 py-8 bg-gray-700 text-white text-lg shadow-xl shadow-gray-800 rounded-3xl text-center max-w-lg'>
                     {/* Title */}
                     <h1 className="my-4 lg:text-3xl text-2xl mb-10">Chat App By Prio</h1>
                     
@@ -211,6 +257,13 @@ const Login = () => {
                         {error && (
                             <div className='text-red-400 text-sm bg-red-900/20 p-3 rounded-lg border border-red-400/30'>
                                 {error}
+                            </div>
+                        )}
+
+                        {/* Debug Information Display */}
+                        {debugInfo && !isLogin && (
+                            <div className='text-xs text-gray-300 bg-gray-800/50 p-3 rounded-lg border border-gray-600 text-left max-h-32 overflow-y-auto'>
+                                <pre className="whitespace-pre-wrap">{debugInfo}</pre>
                             </div>
                         )}
 
