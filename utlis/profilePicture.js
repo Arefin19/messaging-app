@@ -1,4 +1,4 @@
-// utils/profilePicture.js - Enhanced with debugging
+// utils/profilePicture.js - Fixed version with better Firebase Auth integration
 
 /**
  * Get user profile picture with proper fallback handling and debugging
@@ -26,13 +26,9 @@ export const getUserProfilePicture = (user, size = 40) => {
   if (user.photoURL && user.photoURL.trim() !== '') {
     console.log('User has photoURL:', user.photoURL);
     
-    // Check if it's not already a fallback avatar
-    if (!user.photoURL.includes('ui-avatars.com')) {
-      console.log('Using uploaded profile picture:', user.photoURL);
-      return user.photoURL;
-    } else {
-      console.log('PhotoURL is already a fallback avatar, checking if we should regenerate');
-    }
+    // Always try to use the provided photoURL first
+    // Don't check if it's a fallback - let the error handler deal with failures
+    return user.photoURL;
   } else {
     console.log('User has no photoURL or it is empty');
   }
@@ -70,6 +66,9 @@ export const handleProfilePictureError = (e, user, size = 40) => {
   
   console.log('Setting fallback image:', fallbackUrl);
   e.target.src = fallbackUrl;
+  
+  // Prevent infinite error loops
+  e.target.onerror = null;
 };
 
 /**
@@ -100,12 +99,14 @@ export const debugUserProfile = (user) => {
 
   // Test if photoURL is accessible
   if (user.photoURL) {
+    console.log('Testing profile picture accessibility...');
     const testImg = new Image();
     testImg.onload = () => {
       console.log('DEBUG: Profile picture URL is accessible and loads correctly');
     };
     testImg.onerror = (error) => {
       console.error('DEBUG: Profile picture URL failed to load:', error);
+      console.log('This might be due to CORS policy or the image being deleted');
     };
     testImg.src = user.photoURL;
   }
@@ -132,6 +133,35 @@ export const refreshUserProfile = async (auth) => {
     console.error('Error refreshing user profile:', error);
   }
   return null;
+};
+
+/**
+ * Force refresh the Firebase Auth user profile
+ * This is important after profile updates during signup
+ * @param {Object} auth - Firebase auth instance
+ * @returns {Promise<boolean>} - Success status
+ */
+export const forceRefreshUser = async (auth) => {
+  try {
+    if (!auth.currentUser) {
+      console.log('No current user to refresh');
+      return false;
+    }
+
+    console.log('Force refreshing user profile...');
+    
+    // Get the ID token with force refresh
+    await auth.currentUser.getIdToken(true);
+    
+    // Reload the user profile
+    await auth.currentUser.reload();
+    
+    console.log('User profile force refreshed successfully');
+    return true;
+  } catch (error) {
+    console.error('Error force refreshing user profile:', error);
+    return false;
+  }
 };
 
 /**

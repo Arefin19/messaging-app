@@ -23,7 +23,6 @@ import { auth } from '../firebaseconfig';
 import { collection, query, where, onSnapshot, doc, setDoc, serverTimestamp, addDoc } from 'firebase/firestore';
 import { db } from '../firebaseconfig';
 import getOtherUser from '../utlis/getOtherUser';
-import { getUserProfilePicture, handleProfilePictureError } from '../utlis/profilePicture';
 
 const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
   const [user, loadingAuth, authError] = useAuthState(auth);
@@ -269,6 +268,23 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
     }
   };
 
+  // Function to get user profile picture with proper fallback
+  const getUserProfilePicture = (user) => {
+    if (!user) return null;
+    
+    // Check if photoURL exists and is a valid URL
+    if (user.photoURL && user.photoURL.trim() !== '') {
+      return user.photoURL;
+    }
+    
+    // Generate a fallback avatar using the user's initial
+    const initial = user.displayName ? 
+      user.displayName.charAt(0).toUpperCase() : 
+      user.email.charAt(0).toUpperCase();
+    
+    return `https://ui-avatars.com/api/?name=${initial}&background=random&color=fff&size=40`;
+  };
+
   const filteredChats = chats.filter(chat => {
     const otherUserEmail = getOtherUser(chat.users, user?.email?.toLowerCase() || '');
     return otherUserEmail.toLowerCase().includes(searchQuery.toLowerCase());
@@ -318,7 +334,7 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
     );
   }
 
-  const currentUserProfilePic = getUserProfilePicture(user, 40);
+  const currentUserProfilePic = getUserProfilePicture(user);
 
   return (
     <aside className='bg-gradient-to-b from-gray-700 to-gray-800 relative rounded-lg flex flex-col h-full shadow-xl shadow-gray-900/50 w-full text-left text-white p-4'>
@@ -334,8 +350,13 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
               src={currentUserProfilePic} 
               alt="User profile" 
               className="w-10 h-10 rounded-full object-cover border-2 border-dPri"
-              onError={(e) => handleProfilePictureError(e, user, 40)}
-              onLoad={() => console.log('Profile picture loaded successfully:', currentUserProfilePic)}
+              onError={(e) => {
+                // If image fails to load, use initials fallback
+                const initial = user.displayName ? 
+                  user.displayName.charAt(0).toUpperCase() : 
+                  user.email.charAt(0).toUpperCase();
+                e.target.src = `https://ui-avatars.com/api/?name=${initial}&background=4F46E5&color=fff&size=40`;
+              }}
             />
             <div>
               <h1 className="font-medium truncate max-w-[120px]">{user.displayName || user.email.split('@')[0]}</h1>
@@ -537,7 +558,7 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
                   chat.users.includes(userData.email.toLowerCase())
                 );
 
-                const userProfilePic = getUserProfilePicture(userData, 40);
+                const userProfilePic = getUserProfilePicture(userData);
 
                 return (
                   <div
@@ -549,7 +570,12 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
                       src={userProfilePic} 
                       alt="User profile" 
                       className="w-10 h-10 rounded-full object-cover"
-                      onError={(e) => handleProfilePictureError(e, userData, 40)}
+                      onError={(e) => {
+                        const initial = userData.displayName ? 
+                          userData.displayName.charAt(0).toUpperCase() : 
+                          userData.email.charAt(0).toUpperCase();
+                        e.target.src = `https://ui-avatars.com/api/?name=${initial}&background=4F46E5&color=fff&size=40`;
+                      }}
                     />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
