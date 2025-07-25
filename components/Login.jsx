@@ -31,24 +31,46 @@ const Login = () => {
             } else {
                 // Create user
                 const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
                 
                 // Upload profile picture if exists
                 let photoURL = null;
                 if (profilePic) {
-                    const storageRef = ref(storage, `profilePictures/${userCredential.user.uid}/${profilePic.name}`);
-                    await uploadBytes(storageRef, profilePic);
-                    photoURL = await getDownloadURL(storageRef);
+                    try {
+                        // Use the correct path that matches your Firebase Storage rules
+                        const storageRef = ref(storage, `profilePictures/${user.uid}/${profilePic.name}`);
+                        console.log('Uploading to path:', `profilePictures/${user.uid}/${profilePic.name}`);
+                        
+                        const uploadResult = await uploadBytes(storageRef, profilePic);
+                        console.log('Upload successful:', uploadResult);
+                        
+                        photoURL = await getDownloadURL(storageRef);
+                        console.log('Download URL:', photoURL);
+                    } catch (uploadError) {
+                        console.error('Error uploading profile picture:', uploadError);
+                        // Continue with account creation even if image upload fails
+                        setError('Account created but profile picture upload failed. You can update it later.');
+                    }
                 }
                 
+                // Create fallback avatar URL if no profile picture
+                const fallbackAvatarURL = `https://ui-avatars.com/api/?name=${encodeURIComponent(username)}&background=4F46E5&color=fff&size=200`;
+                
                 // Update user profile with username and photo
-                await updateProfile(userCredential.user, {
+                await updateProfile(user, {
                     displayName: username,
-                    photoURL: photoURL || `https://ui-avatars.com/api/?name=${username.replace(' ', '+')}&background=random`
+                    photoURL: photoURL || fallbackAvatarURL
+                });
+
+                console.log('Profile updated with:', {
+                    displayName: username,
+                    photoURL: photoURL || fallbackAvatarURL
                 });
 
                 router.push('/');
             }
         } catch (err) {
+            console.error('Authentication error:', err);
             setError(err.message);
         } finally {
             setIsLoading(false);
@@ -68,11 +90,15 @@ const Login = () => {
                 return;
             }
 
+            console.log('Selected file:', file);
             setProfilePic(file);
+            setError(null); // Clear any previous errors
+            
             // Create preview
             const reader = new FileReader();
             reader.onloadend = () => {
                 setPreviewImage(reader.result);
+                console.log('Preview created');
             };
             reader.readAsDataURL(file);
         }
@@ -101,7 +127,7 @@ const Login = () => {
                         <div className='flex justify-center mb-6'>
                             <div className='relative'>
                                 <label htmlFor="profilePic" className="cursor-pointer group">
-                                    <div className="w-24 h-24 rounded-full bg-dPri flex items-center justify-center overflow-hidden border-4 border-gray-700">
+                                    <div className="w-24 h-24 rounded-full bg-dPri flex items-center justify-center overflow-hidden border-4 border-gray-700 hover:border-gray-500 transition-all">
                                         {previewImage ? (
                                             <img 
                                                 src={previewImage} 
@@ -151,7 +177,7 @@ const Login = () => {
                                     value={username}
                                     onChange={(e) => setUsername(e.target.value)}
                                     placeholder='Username'
-                                    className='p-2 w-full bg-transparent outline-0 border-b-2 border-dPri hover:border-lPri transition-all text-white'
+                                    className='p-2 w-full bg-transparent outline-0 border-b-2 border-dPri hover:border-lPri transition-all text-white placeholder-gray-300'
                                     required
                                     minLength="3"
                                     maxLength="20"
@@ -165,7 +191,7 @@ const Login = () => {
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 placeholder='Email'
-                                className='p-2 w-full bg-transparent outline-0 border-b-2 border-dPri hover:border-lPri transition-all text-white'
+                                className='p-2 w-full bg-transparent outline-0 border-b-2 border-dPri hover:border-lPri transition-all text-white placeholder-gray-300'
                                 required
                             />
                         </div>
@@ -176,14 +202,14 @@ const Login = () => {
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 placeholder='Password'
-                                className='p-2 w-full bg-transparent outline-0 border-b-2 border-dPri hover:border-lPri transition-all text-white'
+                                className='p-2 w-full bg-transparent outline-0 border-b-2 border-dPri hover:border-lPri transition-all text-white placeholder-gray-300'
                                 required
                                 minLength="6"
                             />
                         </div>
 
                         {error && (
-                            <div className='text-red-400 text-sm'>
+                            <div className='text-red-400 text-sm bg-red-900/20 p-3 rounded-lg border border-red-400/30'>
                                 {error}
                             </div>
                         )}
@@ -199,7 +225,7 @@ const Login = () => {
                                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                                     </svg>
-                                    Processing...
+                                    {isLogin ? 'Signing in...' : 'Creating account...'}
                                 </span>
                             ) : isLogin ? 'Login' : 'Sign Up'}
                         </Button>
@@ -209,6 +235,7 @@ const Login = () => {
                         <button 
                             onClick={switchAuthMode}
                             className="text-lPri hover:text-dPri underline cursor-pointer"
+                            type="button"
                         >
                             {isLogin ? "Don't have an account? Sign up" : "Already have an account? Login"}
                         </button>
