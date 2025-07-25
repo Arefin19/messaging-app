@@ -10,16 +10,103 @@ import {
   faCheckDouble,
   faReply,
   faFaceSmile,
-  faImage
+  faImage,
+  faTimes,
+  faPlay,
+  faDownload
 } from '@fortawesome/free-solid-svg-icons';
 import { useRouter } from 'next/router';
 import { useCollectionData, useDocumentData } from 'react-firebase-hooks/firestore';
 import { addDoc, collection, doc, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
-import { db, auth } from '../firebaseconfig';
+import { db, auth, storage } from '../firebaseconfig';
 import { useAuthState } from 'react-firebase-hooks/auth';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import getOtherUser from '../utlis/getOtherUser';
 
-const Message = ({ sender, text, time, isSameSender, isLastMessage, userPhoto, otherUserPhoto }) => {
+// Simple emoji picker component
+const EmojiPicker = ({ onEmojiSelect, onClose, isVisible }) => {
+  const emojis = [
+    '😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', '😇', '🙂',
+    '😉', '😌', '😍', '🥰', '😘', '😗', '😙', '😚', '😋', '😛',
+    '😝', '😜', '🤪', '🤨', '🧐', '🤓', '😎', '🥸', '🤩', '🥳',
+    '😏', '😒', '😞', '😔', '😟', '😕', '🙁', '☹️', '😣', '😖',
+    '😫', '😩', '🥺', '😢', '😭', '😤', '😠', '😡', '🤬', '🤯',
+    '😳', '🥵', '🥶', '😶', '😐', '😑', '😬', '🙄', '😯', '😦',
+    '😧', '😮', '😲', '🥱', '😴', '🤤', '😪', '😵', '🤐', '🥴',
+    '🤢', '🤮', '🤧', '😷', '🤒', '🤕', '🤑', '🤠', '😈', '👿',
+    '👻', '💀', '☠️', '👽', '👾', '🤖', '🎃', '😺', '😸', '😹',
+    '❤️', '🧡', '💛', '💚', '💙', '💜', '🖤', '🤍', '🤎', '💔',
+    '❣️', '💕', '💞', '💓', '💗', '💖', '💘', '💝', '💟', '☮️',
+    '✝️', '☪️', '🕉️', '☸️', '✡️', '🔯', '🕎', '☯️', '☦️', '🛐',
+    '⛎', '♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐',
+    '👍', '👎', '👌', '🤌', '🤏', '✌️', '🤞', '🤟', '🤘', '🤙',
+    '👈', '👉', '👆', '🖕', '👇', '☝️', '👍', '👎', '👊', '✊',
+    '🤛', '🤜', '👏', '🙌', '👐', '🤲', '🤝', '🙏', '✍️', '💅'
+  ];
+
+  if (!isVisible) return null;
+
+  return (
+    <div className="absolute bottom-14 left-0 bg-white dark:bg-gray-700 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 p-4 w-80 max-h-60 overflow-y-auto z-50">
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="text-sm font-medium text-gray-800 dark:text-white">Choose an emoji</h3>
+        <button 
+          onClick={onClose}
+          className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+        >
+          <FontAwesomeIcon icon={faTimes} />
+        </button>
+      </div>
+      <div className="grid grid-cols-10 gap-1">
+        {emojis.map((emoji, index) => (
+          <button
+            key={index}
+            onClick={() => {
+              onEmojiSelect(emoji);
+              onClose();
+            }}
+            className="w-8 h-8 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-lg transition-colors"
+          >
+            {emoji}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+// Image preview component
+const ImagePreview = ({ file, onRemove }) => {
+  const [preview, setPreview] = useState(null);
+
+  useEffect(() => {
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => setPreview(reader.result);
+      reader.readAsDataURL(file);
+    }
+  }, [file]);
+
+  if (!preview) return null;
+
+  return (
+    <div className="relative inline-block mr-2 mb-2">
+      <img 
+        src={preview} 
+        alt="Preview" 
+        className="w-20 h-20 object-cover rounded-lg border border-gray-300"
+      />
+      <button
+        onClick={onRemove}
+        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600"
+      >
+        <FontAwesomeIcon icon={faTimes} />
+      </button>
+    </div>
+  );
+};
+
+const Message = ({ sender, text, time, isSameSender, isLastMessage, userPhoto, otherUserPhoto, imageUrl, replyTo }) => {
   const formattedTime = time?.toDate()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || '';
 
   return (
@@ -35,7 +122,7 @@ const Message = ({ sender, text, time, isSameSender, isLastMessage, userPhoto, o
               />
             ) : (
               <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium">
-                {sender ? 'You' : 'U'}
+                U
               </div>
             )}
           </div>
@@ -57,7 +144,32 @@ const Message = ({ sender, text, time, isSameSender, isLastMessage, userPhoto, o
                 : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-tl-none'
             } ${isSameSender ? sender ? 'rounded-tr-lg' : 'rounded-tl-lg' : ''}`}
           >
-            <p className="whitespace-pre-wrap break-words">{text}</p>
+            {/* Reply preview */}
+            {replyTo && (
+              <div className={`mb-2 p-2 rounded border-l-2 ${
+                sender ? 'border-blue-300 bg-blue-400/20' : 'border-gray-400 bg-gray-300/20'
+              }`}>
+                <p className="text-xs opacity-75">
+                  Replying to {replyTo.sender === sender ? 'yourself' : 'other user'}
+                </p>
+                <p className="text-sm truncate">{replyTo.message}</p>
+              </div>
+            )}
+
+            {/* Image content */}
+            {imageUrl && (
+              <div className="mb-2">
+                <img 
+                  src={imageUrl} 
+                  alt="Shared image" 
+                  className="max-w-full h-auto rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                  onClick={() => window.open(imageUrl, '_blank')}
+                />
+              </div>
+            )}
+
+            {/* Text content */}
+            {text && <p className="whitespace-pre-wrap break-words">{text}</p>}
           </div>
 
           <div className={`flex items-center mt-1 space-x-1 ${sender ? 'flex-row-reverse' : ''}`}>
@@ -89,18 +201,51 @@ const ChatBox = () => {
   const [chat, loadingChat] = useDocumentData(doc(db, `chats/${id}`));
   const scrollEnd = useRef();
   const textInputRef = useRef();
+  const fileInputRef = useRef();
   const [isSending, setIsSending] = useState(false);
   const [error, setError] = useState(null);
   const [showOptions, setShowOptions] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [isUploading, setIsUploading] = useState(false);
+
+  // Function to get user profile picture with fallback
+  const getUserProfilePicture = (user) => {
+    if (!user) return null;
+    
+    if (user.photoURL && user.photoURL.trim() !== '') {
+      return user.photoURL;
+    }
+    
+    const initial = user.displayName ? 
+      user.displayName.charAt(0).toUpperCase() : 
+      user.email.charAt(0).toUpperCase();
+    
+    return `https://ui-avatars.com/api/?name=${initial}&background=random&color=fff&size=32`;
+  };
 
   const handleSend = async () => {
     const trimmedText = textBox?.trim() || '';
-    if (!trimmedText || !user?.email || isSending) return;
+    if ((!trimmedText && selectedFiles.length === 0) || !user?.email || isSending) return;
 
     try {
       setIsSending(true);
       setError(null);
+
+      let imageUrls = [];
+
+      // Upload images if any
+      if (selectedFiles.length > 0) {
+        setIsUploading(true);
+        for (const file of selectedFiles) {
+          const storageRef = ref(storage, `chat-images/${id}/${Date.now()}-${file.name}`);
+          await uploadBytes(storageRef, file);
+          const downloadURL = await getDownloadURL(storageRef);
+          imageUrls.push(downloadURL);
+        }
+        setIsUploading(false);
+      }
 
       const messageData = {
         message: trimmedText,
@@ -108,6 +253,11 @@ const ChatBox = () => {
         timestamp: serverTimestamp(),
         read: false
       };
+
+      if (imageUrls.length > 0) {
+        messageData.images = imageUrls;
+        messageData.imageUrl = imageUrls[0]; // For backward compatibility
+      }
 
       if (replyingTo) {
         messageData.replyTo = {
@@ -120,16 +270,18 @@ const ChatBox = () => {
 
       await updateDoc(doc(db, `chats/${id}`), {
         lastUpdated: serverTimestamp(),
-        lastMessage: trimmedText
+        lastMessage: trimmedText || '📷 Image'
       });
 
       setTextBox('');
       setReplyingTo(null);
+      setSelectedFiles([]);
     } catch (err) {
       console.error("Error sending message:", err);
       setError('Failed to send message. Please try again.');
     } finally {
       setIsSending(false);
+      setIsUploading(false);
     }
   };
 
@@ -142,6 +294,37 @@ const ChatBox = () => {
 
   const handleInputChange = (e) => {
     setTextBox(e.target.value || '');
+  };
+
+  const handleEmojiSelect = (emoji) => {
+    setTextBox(prev => prev + emoji);
+    textInputRef.current?.focus();
+  };
+
+  const handleFileSelect = (e) => {
+    const files = Array.from(e.target.files);
+    const validFiles = files.filter(file => {
+      // Check file type
+      if (!file.type.startsWith('image/')) {
+        setError('Please select only image files');
+        return false;
+      }
+      // Check file size (5MB limit)
+      if (file.size > 5 * 1024 * 1024) {
+        setError('Image size should be less than 5MB');
+        return false;
+      }
+      return true;
+    });
+
+    if (validFiles.length > 0) {
+      setSelectedFiles(prev => [...prev, ...validFiles].slice(0, 3)); // Max 3 images
+      setError(null);
+    }
+  };
+
+  const removeFile = (index) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   useEffect(() => {
@@ -158,6 +341,18 @@ const ChatBox = () => {
       });
     }
   }, [messages]);
+
+  // Close emoji picker when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showEmojiPicker && !event.target.closest('.emoji-picker-container')) {
+        setShowEmojiPicker(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [showEmojiPicker]);
 
   if (loadingChat) {
     return (
@@ -189,6 +384,7 @@ const ChatBox = () => {
   }
 
   const otherUserEmail = getOtherUser(chat.users, user?.email || '');
+  const currentUserProfilePic = getUserProfilePicture(user);
 
   return (
     <section className='bg-gray-100 dark:bg-gray-800 relative flex flex-col rounded-xl h-full shadow-lg w-full text-left'>
@@ -207,19 +403,17 @@ const ChatBox = () => {
           </button>
 
           <div className="relative">
-            {user?.photoURL ? (
-              <img
-                src={user.photoURL}
-                alt="Profile"
-                className="w-10 h-10 rounded-full object-cover border-2 border-blue-400"
-              />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-gray-300 dark:bg-gray-600 flex items-center justify-center border-2 border-blue-400">
-                <span className="text-white font-medium">
-                  {user?.displayName?.charAt(0).toUpperCase()}
-                </span>
-              </div>
-            )}
+            <img
+              src={currentUserProfilePic}
+              alt="Profile"
+              className="w-10 h-10 rounded-full object-cover border-2 border-blue-400"
+              onError={(e) => {
+                const initial = user?.displayName ? 
+                  user.displayName.charAt(0).toUpperCase() : 
+                  user?.email.charAt(0).toUpperCase();
+                e.target.src = `https://ui-avatars.com/api/?name=${initial}&background=4F46E5&color=fff&size=40`;
+              }}
+            />
             <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-700"></div>
           </div>
 
@@ -288,8 +482,10 @@ const ChatBox = () => {
                 time={msg.timestamp}
                 isSameSender={i > 0 && messages[i - 1].sender === msg.sender}
                 isLastMessage={i === messages.length - 1}
-                userPhoto={user?.photoURL}
-                otherUserPhoto={null} // You would replace this with the actual other user's photo
+                userPhoto={currentUserProfilePic}
+                otherUserPhoto={null}
+                imageUrl={msg.imageUrl}
+                replyTo={msg.replyTo}
               />
             ))}
           </div>
@@ -317,8 +513,23 @@ const ChatBox = () => {
         </div>
       )}
 
+      {/* File previews */}
+      {selectedFiles.length > 0 && (
+        <div className="p-3 bg-gray-100 dark:bg-gray-700 border-t border-gray-300 dark:border-gray-600">
+          <div className="flex flex-wrap">
+            {selectedFiles.map((file, index) => (
+              <ImagePreview 
+                key={index} 
+                file={file} 
+                onRemove={() => removeFile(index)} 
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Message input */}
-      <div className="p-3 bg-white dark:bg-gray-700 rounded-b-xl border-t border-gray-200 dark:border-gray-600">
+      <div className="p-3 bg-white dark:bg-gray-700 rounded-b-xl border-t border-gray-200 dark:border-gray-600 relative">
         {error && (
           <div className="mb-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300 rounded-lg text-sm">
             {error}
@@ -326,12 +537,38 @@ const ChatBox = () => {
         )}
 
         <div className="flex items-center gap-2">
-          <button className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300">
-            <FontAwesomeIcon icon={faFaceSmile} />
-          </button>
-          <button className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300">
+          {/* Emoji picker container */}
+          <div className="emoji-picker-container relative">
+            <button 
+              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
+              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+              disabled={isSending}
+            >
+              <FontAwesomeIcon icon={faFaceSmile} />
+            </button>
+            <EmojiPicker 
+              isVisible={showEmojiPicker}
+              onEmojiSelect={handleEmojiSelect}
+              onClose={() => setShowEmojiPicker(false)}
+            />
+          </div>
+
+          {/* Image upload */}
+          <button 
+            className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
+            onClick={() => fileInputRef.current?.click()}
+            disabled={isSending || selectedFiles.length >= 3}
+          >
             <FontAwesomeIcon icon={faImage} />
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            onChange={handleFileSelect}
+            className="hidden"
+          />
 
           <div className="flex-1 relative">
             <input
@@ -358,21 +595,28 @@ const ChatBox = () => {
 
           <button
             onClick={handleSend}
-            disabled={!textBox?.trim() || isSending}
+            disabled={(!textBox?.trim() && selectedFiles.length === 0) || isSending}
             className={`p-3 rounded-full transition-all outline-none ${
-              !textBox?.trim() || isSending
+              (!textBox?.trim() && selectedFiles.length === 0) || isSending
                 ? 'bg-gray-300 dark:bg-gray-600 cursor-not-allowed text-gray-500'
                 : 'bg-blue-500 hover:bg-blue-600 text-white shadow-md hover:shadow-lg'
             }`}
             aria-label="Send message"
           >
-            {isSending ? (
+            {isSending || isUploading ? (
               <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
             ) : (
               <FontAwesomeIcon icon={faPaperPlane} />
             )}
           </button>
         </div>
+
+        {/* Upload progress indicator */}
+        {isUploading && (
+          <div className="mt-2 text-xs text-blue-500">
+            Uploading images...
+          </div>
+        )}
       </div>
     </section>
   );

@@ -268,6 +268,23 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
     }
   };
 
+  // Function to get user profile picture with proper fallback
+  const getUserProfilePicture = (user) => {
+    if (!user) return null;
+    
+    // Check if photoURL exists and is a valid URL
+    if (user.photoURL && user.photoURL.trim() !== '') {
+      return user.photoURL;
+    }
+    
+    // Generate a fallback avatar using the user's initial
+    const initial = user.displayName ? 
+      user.displayName.charAt(0).toUpperCase() : 
+      user.email.charAt(0).toUpperCase();
+    
+    return `https://ui-avatars.com/api/?name=${initial}&background=random&color=fff&size=40`;
+  };
+
   const filteredChats = chats.filter(chat => {
     const otherUserEmail = getOtherUser(chat.users, user?.email?.toLowerCase() || '');
     return otherUserEmail.toLowerCase().includes(searchQuery.toLowerCase());
@@ -317,10 +334,10 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
     );
   }
 
+  const currentUserProfilePic = getUserProfilePicture(user);
+
   return (
     <aside className='bg-gradient-to-b from-gray-700 to-gray-800 relative rounded-lg flex flex-col h-full shadow-xl shadow-gray-900/50 w-full text-left text-white p-4'>
-      
-
       {/* Header Section */}
       <div className="flex flex-col gap-3 border-b border-gray-600 pb-4">
         {/* User Info with Menu */}
@@ -329,21 +346,18 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
             className="flex items-center gap-x-3 cursor-pointer hover:bg-gray-600/50 rounded-lg p-2 transition-all"
             onClick={() => setShowUserMenu(!showUserMenu)}
           >
-            {user.photoURL ? (
-              <img 
-                src={user.photoURL} 
-                alt="User profile" 
-                className="w-10 h-10 rounded-full object-cover border-2 border-dPri"
-                onError={(e) => {
-                  e.target.onerror = null;
-                  e.target.src = '';
-                }}
-              />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-dPri flex items-center justify-center border-2 border-dPri">
-                <FontAwesomeIcon icon={faUser} className="text-white text-lg" />
-              </div>
-            )}
+            <img 
+              src={currentUserProfilePic} 
+              alt="User profile" 
+              className="w-10 h-10 rounded-full object-cover border-2 border-dPri"
+              onError={(e) => {
+                // If image fails to load, use initials fallback
+                const initial = user.displayName ? 
+                  user.displayName.charAt(0).toUpperCase() : 
+                  user.email.charAt(0).toUpperCase();
+                e.target.src = `https://ui-avatars.com/api/?name=${initial}&background=4F46E5&color=fff&size=40`;
+              }}
+            />
             <div>
               <h1 className="font-medium truncate max-w-[120px]">{user.displayName || user.email.split('@')[0]}</h1>
               <p className="text-xs text-gray-300">Online</p>
@@ -481,14 +495,7 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
                 ) : (
                   <>
                     <p className="mb-2">No chats yet</p>
-                    <Button 
-                      onClick={() => setShowAddContact(true)}
-                      className="flex items-center gap-2"
-                      variant="outline"
-                    >
-                      <FontAwesomeIcon icon={faPlus} />
-                      Start a new chat
-                    </Button>
+                    
                   </>
                 )}
               </div>
@@ -551,27 +558,25 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
                   chat.users.includes(userData.email.toLowerCase())
                 );
 
+                const userProfilePic = getUserProfilePicture(userData);
+
                 return (
                   <div
                     key={userData.id}
                     onClick={() => startChatWithUser(userData)}
                     className="flex items-center gap-3 p-3 hover:bg-gray-600/50 rounded-lg cursor-pointer transition-all mb-2"
                   >
-                    {userData.photoURL ? (
-                      <img 
-                        src={userData.photoURL} 
-                        alt="User profile" 
-                        className="w-10 h-10 rounded-full object-cover"
-                        onError={(e) => {
-                          e.target.onerror = null;
-                          e.target.src = '';
-                        }}
-                      />
-                    ) : (
-                      <div className="w-10 h-10 rounded-full bg-dPri flex items-center justify-center">
-                        <FontAwesomeIcon icon={faUser} className="text-white" />
-                      </div>
-                    )}
+                    <img 
+                      src={userProfilePic} 
+                      alt="User profile" 
+                      className="w-10 h-10 rounded-full object-cover"
+                      onError={(e) => {
+                        const initial = userData.displayName ? 
+                          userData.displayName.charAt(0).toUpperCase() : 
+                          userData.email.charAt(0).toUpperCase();
+                        e.target.src = `https://ui-avatars.com/api/?name=${initial}&background=4F46E5&color=fff&size=40`;
+                      }}
+                    />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
                         <h3 className="font-medium truncate">
