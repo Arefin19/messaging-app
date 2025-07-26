@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/router';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faRightFromBracket, 
@@ -24,7 +25,8 @@ import { collection, query, where, onSnapshot, doc, setDoc, serverTimestamp, add
 import { db } from '../firebaseconfig';
 import getOtherUser from '../utlis/getOtherUser';
 
-const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
+const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) => {
+  const router = useRouter();
   const [user, loadingAuth, authError] = useAuthState(auth);
   const [chats, setChats] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
@@ -236,7 +238,7 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
 
       if (existingChat) {
         console.log('Found existing chat:', existingChat.id);
-        setSelectedChat(existingChat);
+        handleChatSelection(existingChat);
         return;
       }
 
@@ -261,10 +263,22 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
         ...newChatData
       };
       
-      setSelectedChat(newChat);
+      handleChatSelection(newChat);
     } catch (error) {
       console.error('Error creating chat:', error);
       setError('Failed to start chat: ' + error.message);
+    }
+  };
+
+  // Handle chat selection - works for both with and without setSelectedChat prop
+  const handleChatSelection = (chat) => {
+    if (setSelectedChat) {
+      // If we're on the home page with setSelectedChat prop
+      setSelectedChat(chat);
+      setSearchQuery('');
+    } else {
+      // If we're on a chat page, navigate to the chat
+      router.push(`/chat/${chat.id}`);
     }
   };
 
@@ -502,16 +516,14 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
             ) : (
               filteredChats.map((chat) => {
                 const otherUserEmail = getOtherUser(chat.users, user.email?.toLowerCase() || '');
+                const isActive = activeChatId === chat.id;
                 return (
                   <ContactCard 
                     key={chat.id}
                     data={chat}
                     email={otherUserEmail}
-                    onClick={() => {
-                      setSelectedChat(chat);
-                      setSearchQuery('');
-                    }}
-                    isActive={false}
+                    onClick={() => handleChatSelection(chat)}
+                    isActive={isActive}
                   />
                 );
               })
@@ -579,7 +591,7 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode }) => {
                     />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
-                        <h3 className="font-medium truncate">
+                        <h3 className="font-medium truncate text-white">
                           {userData.displayName}
                         </h3>
                         {existingChat && (

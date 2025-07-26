@@ -7,11 +7,15 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { formatDistanceToNow } from 'date-fns';
 
-const ContactCard = ({ data, email, isActive, lastMessage }) => {
+const ContactCard = ({ data, email, isActive, lastMessage, onClick }) => {
   const router = useRouter();
 
   const redirect = () => {
-    router.push(`/chat/${data.id}`);
+    if (onClick) {
+      onClick();
+    } else {
+      router.push(`/chat/${data.id}`);
+    }
   };
 
   const formatTime = (timestamp) => {
@@ -26,58 +30,80 @@ const ContactCard = ({ data, email, isActive, lastMessage }) => {
       : message;
   };
 
-  return (
-    <div 
-      className={`flex items-center p-4 cursor-pointer transition-all duration-200 ${
-        isActive 
-          ? 'bg-gradient-to-r from-blue-50 to-cyan-50 dark:from-blue-900/20 dark:to-cyan-900/20 border-l-2 border-cyan-400' 
-          : 'hover:bg-gray-50 dark:hover:bg-gray-700/20'
-      } rounded-lg`}
-      onClick={redirect}
-    >
-      {/* Profile Avatar */}
-      <div className="relative mr-4">
-        <div className="w-12 h-12 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center text-white font-medium shadow-sm">
-          {email.charAt(0).toUpperCase()}
-        </div>
-        {data.isOnline && (
-          <div className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-800 bg-green-400" />
-        )}
-      </div>
+  // Function to get user profile picture with proper fallback
+  const getUserProfilePicture = (userEmail) => {
+    if (!userEmail) return null;
+    
+    // Generate a fallback avatar using the user's initial
+    const initial = userEmail.charAt(0).toUpperCase();
+    return `https://ui-avatars.com/api/?name=${initial}&background=4F46E5&color=fff&size=40`;
+  };
 
-      {/* Contact Info */}
+  const userProfilePic = getUserProfilePicture(email);
+
+  // Check if user is online (you might want to pass this as prop or fetch from user data)
+  const isOnline = false; // You can implement online status checking here
+
+  // Check if there's an existing chat (for "Connected" badge)
+  const hasExistingChat = data && data.id;
+
+  return (
+    <div
+      onClick={redirect}
+      className="flex items-center gap-3 p-3 hover:bg-gray-600/50 rounded-lg cursor-pointer transition-all mb-2"
+    >
+      <img 
+        src={userProfilePic} 
+        alt="User profile" 
+        className="w-10 h-10 rounded-full object-cover"
+        onError={(e) => {
+          const initial = email.charAt(0).toUpperCase();
+          e.target.src = `https://ui-avatars.com/api/?name=${initial}&background=4F46E5&color=fff&size=40`;
+        }}
+      />
       <div className="flex-1 min-w-0">
-        <div className="flex justify-between items-center">
-          <h2 className="text-gray-800 dark:text-gray-100 font-medium truncate">
-            {email}
-          </h2>
-          {lastMessage?.timestamp && (
-            <span className="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap ml-2">
+        <div className="flex items-center justify-between">
+          <h3 className="font-medium truncate text-white">
+            {email.split('@')[0]} {/* Show username part only, like displayName */}
+          </h3>
+         
+          {lastMessage?.timestamp && !hasExistingChat && (
+            <span className="text-xs text-gray-400 whitespace-nowrap ml-2">
               {formatTime(lastMessage.timestamp)}
             </span>
           )}
         </div>
-
-        {/* Last Message Preview */}
-        {lastMessage && (
+        <p className="text-xs text-gray-400 truncate">
+          {email}
+        </p>
+        
+        {/* Last Message Preview or Online Status */}
+        {lastMessage ? (
           <div className="flex items-center gap-1.5 mt-1">
             {lastMessage.sender === email ? (
               <>
-                <span className="text-gray-600 dark:text-gray-300 text-sm truncate">
+                <span className="text-gray-300 text-xs truncate">
                   {truncateMessage(lastMessage.text)}
                 </span>
                 <FontAwesomeIcon 
                   icon={lastMessage.read ? faCheckDouble : faMessage} 
                   className={`text-xs ${
-                    lastMessage.read ? 'text-cyan-500 dark:text-cyan-400' : 'text-gray-400'
+                    lastMessage.read ? 'text-cyan-400' : 'text-gray-400'
                   }`} 
                 />
               </>
             ) : (
-              <span className="text-gray-500 dark:text-gray-400 text-sm truncate">
+              <span className="text-gray-400 text-xs truncate">
                 You: {truncateMessage(lastMessage.text)}
               </span>
             )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 mt-1">
+            <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400' : 'bg-gray-400'}`}></div>
+            <span className="text-xs text-gray-400">
+              {isOnline ? 'Online' : 'Offline'}
+            </span>
           </div>
         )}
       </div>
