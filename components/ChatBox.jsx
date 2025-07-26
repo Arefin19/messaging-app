@@ -13,11 +13,12 @@ import {
   faImage,
   faTimes,
   faPlay,
-  faDownload
+  faDownload,
+  faHeart
 } from '@fortawesome/free-solid-svg-icons';
 import { useRouter } from 'next/router';
 import { useCollectionData, useDocumentData } from 'react-firebase-hooks/firestore';
-import { addDoc, collection, doc, orderBy, query, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { addDoc, collection, doc, orderBy, query, serverTimestamp, updateDoc, onSnapshot } from 'firebase/firestore';
 import { db, auth, storage } from '../firebaseconfig';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -76,6 +77,105 @@ const EmojiPicker = ({ onEmojiSelect, onClose, isVisible }) => {
   );
 };
 
+// Quick reaction picker component
+const QuickReactionPicker = ({ onReactionSelect, onClose, isVisible, position = { top: 0, left: 0 } }) => {
+  const quickReactions = ['👍', '❤️', '😂', '😮', '😢', '😡'];
+
+  if (!isVisible) return null;
+
+  return (
+    <div 
+      className="fixed bg-white dark:bg-gray-700 rounded-full shadow-xl border border-gray-200 dark:border-gray-600 p-2 z-50 flex gap-1"
+      style={{ 
+        top: position.top - 60, 
+        left: Math.max(10, position.left - 120),
+        transform: 'translateX(0)'
+      }}
+    >
+      {quickReactions.map((reaction, index) => (
+        <button
+          key={index}
+          onClick={() => {
+            onReactionSelect(reaction);
+            onClose();
+          }}
+          className="w-10 h-10 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-600 rounded-full text-xl transition-all hover:scale-110"
+        >
+          {reaction}
+        </button>
+      ))}
+      <button
+        onClick={onClose}
+        className="w-8 h-8 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-600 rounded-full text-sm transition-colors text-gray-500"
+      >
+        <FontAwesomeIcon icon={faTimes} />
+      </button>
+    </div>
+  );
+};
+
+// Message context menu component
+const MessageContextMenu = ({ 
+  isVisible, 
+  position, 
+  onReply, 
+  onReact, 
+  onCopy, 
+  onDelete, 
+  onClose, 
+  canDelete 
+}) => {
+  if (!isVisible) return null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div 
+        className="fixed inset-0 z-40" 
+        onClick={onClose}
+      />
+      
+      <div 
+        className="fixed bg-white dark:bg-gray-700 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 py-2 z-50 min-w-[150px]"
+        style={{ 
+          top: position.top, 
+          left: position.left,
+          transform: 'translateY(-50%)'
+        }}
+      >
+        <button
+          onClick={() => { onReply(); onClose(); }}
+          className="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-600 flex items-center gap-3 text-gray-800 dark:text-gray-200"
+        >
+          <FontAwesomeIcon icon={faReply} className="text-sm" />
+          Reply
+        </button>
+        <button
+          onClick={() => { onReact(); onClose(); }}
+          className="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-600 flex items-center gap-3 text-gray-800 dark:text-gray-200"
+        >
+          <FontAwesomeIcon icon={faFaceSmile} className="text-sm" />
+          React
+        </button>
+        <button
+          onClick={() => { onCopy(); onClose(); }}
+          className="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-600 flex items-center gap-3 text-gray-800 dark:text-gray-200"
+        >
+          📋 Copy
+        </button>
+        {canDelete && (
+          <button
+            onClick={() => { onDelete(); onClose(); }}
+            className="w-full px-4 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-600 flex items-center gap-3 text-red-500"
+          >
+            🗑️ Delete
+          </button>
+        )}
+      </div>
+    </>
+  );
+};
+
 // Image preview component
 const ImagePreview = ({ file, onRemove }) => {
   const [preview, setPreview] = useState(null);
@@ -107,91 +207,219 @@ const ImagePreview = ({ file, onRemove }) => {
   );
 };
 
-const Message = ({ sender, text, time, isSameSender, isLastMessage, userPhoto, otherUserPhoto, imageUrl, replyTo }) => {
-  const formattedTime = time?.toDate()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || '';
+// Reaction display component
+const MessageReactions = ({ reactions, onReactionClick, currentUserEmail }) => {
+  if (!reactions || Object.keys(reactions).length === 0) return null;
 
   return (
-    <div className={`flex ${sender ? 'justify-end' : 'justify-start'} mb-1 px-2`}>
-      <div className={`flex max-w-xs md:max-w-md lg:max-w-lg ${isSameSender ? 'mt-1' : 'mt-3'}`}>
-        {!sender && !isSameSender && (
-          <div className="flex-shrink-0 mr-2 self-end">
-            {otherUserPhoto ? (
-              <img
-                src={otherUserPhoto}
-                alt="Profile"
-                className="w-8 h-8 rounded-full object-cover"
-                onError={(e) => {
-                  // Fallback to generic avatar
-                  e.target.src = `https://ui-avatars.com/api/?name=U&background=4F46E5&color=fff&size=32`;
-                }}
-              />
-            ) : (
-              <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium">
-                U
-              </div>
-            )}
-          </div>
-        )}
+    <div className="flex flex-wrap gap-1 mt-1">
+      {Object.entries(reactions).map(([emoji, users]) => {
+        const hasReacted = users.includes(currentUserEmail);
+        const count = users.length;
+        
+        return (
+          <button
+            key={emoji}
+            onClick={() => onReactionClick(emoji)}
+            className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs transition-all hover:scale-105 ${
+              hasReacted 
+                ? 'bg-blue-100 dark:bg-blue-900/30 border border-blue-300 dark:border-blue-600' 
+                : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'
+            }`}
+          >
+            <span>{emoji}</span>
+            <span className="text-xs">{count}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
 
-        {!sender && isSameSender && <div className="flex-shrink-0 mr-2 w-8"></div>}
+const Message = ({ 
+  messageId,
+  messageIndex,
+  sender, 
+  text, 
+  time, 
+  isSameSender, 
+  isLastMessage, 
+  userPhoto, 
+  otherUserPhoto, 
+  imageUrl, 
+  replyTo,
+  reactions,
+  onReply,
+  onReact,
+  onContextMenu,
+  currentUserEmail
+}) => {
+  const formattedTime = time?.toDate()?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || '';
+  const [showQuickReactions, setShowQuickReactions] = useState(false);
+  const [reactionPosition, setReactionPosition] = useState({ top: 0, left: 0 });
 
-        <div className={`flex flex-col ${sender ? 'items-end' : 'items-start'}`}>
-          {!isSameSender && (
-            <span className={`text-xs font-medium mb-1 ${sender ? 'text-blue-600' : 'text-gray-600 dark:text-gray-300'}`}>
-              {sender ? 'You' : 'Other User'}
-            </span>
+  // Use messageIndex as fallback for messageId
+  const effectiveMessageId = messageId || messageIndex;
+
+  const handleLongPress = (e) => {
+    e.preventDefault();
+    const rect = e.currentTarget.getBoundingClientRect();
+    onContextMenu(effectiveMessageId, {
+      top: rect.top + window.scrollY,
+      left: rect.right + window.scrollX
+    });
+  };
+
+  const handleDoubleClick = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    setReactionPosition({
+      top: rect.top + window.scrollY,
+      left: rect.left + window.scrollX + rect.width / 2
+    });
+    setShowQuickReactions(true);
+  };
+
+  const handleReactionSelect = (emoji) => {
+    console.log('Selecting reaction:', emoji, 'for message:', effectiveMessageId);
+    onReact(effectiveMessageId, emoji);
+    setShowQuickReactions(false);
+  };
+
+  const handleReactionClick = (emoji) => {
+    console.log('Clicking reaction:', emoji, 'for message:', effectiveMessageId);
+    onReact(effectiveMessageId, emoji);
+  };
+
+  return (
+    <>
+      <div className={`flex ${sender ? 'justify-end' : 'justify-start'} mb-1 px-2 group`}>
+        <div className={`flex max-w-xs md:max-w-md lg:max-w-lg ${isSameSender ? 'mt-1' : 'mt-3'}`}>
+          {!sender && !isSameSender && (
+            <div className="flex-shrink-0 mr-2 self-end">
+              {otherUserPhoto ? (
+                <img
+                  src={otherUserPhoto}
+                  alt="Profile"
+                  className="w-8 h-8 rounded-full object-cover"
+                  onError={(e) => {
+                    e.target.src = `https://ui-avatars.com/api/?name=U&background=4F46E5&color=fff&size=32`;
+                  }}
+                />
+              ) : (
+                <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-medium">
+                  U
+                </div>
+              )}
+            </div>
           )}
 
-          <div
-            className={`px-4 py-2 rounded-lg relative ${
-              sender
-                ? 'bg-blue-500 text-white rounded-tr-none'
-                : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-tl-none'
-            } ${isSameSender ? sender ? 'rounded-tr-lg' : 'rounded-tl-lg' : ''}`}
-          >
-            {/* Reply preview */}
-            {replyTo && (
-              <div className={`mb-2 p-2 rounded border-l-2 ${
-                sender ? 'border-blue-300 bg-blue-400/20' : 'border-gray-400 bg-gray-300/20'
-              }`}>
-                <p className="text-xs opacity-75">
-                  Replying to {replyTo.sender === sender ? 'yourself' : 'other user'}
-                </p>
-                <p className="text-sm truncate">{replyTo.message}</p>
-              </div>
-            )}
+          {!sender && isSameSender && <div className="flex-shrink-0 mr-2 w-8"></div>}
 
-            {/* Image content */}
-            {imageUrl && (
-              <div className="mb-2">
-                <img 
-                  src={imageUrl} 
-                  alt="Shared image" 
-                  className="max-w-full h-auto rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                  onClick={() => window.open(imageUrl, '_blank')}
-                />
-              </div>
-            )}
-
-            {/* Text content */}
-            {text && <p className="whitespace-pre-wrap break-words">{text}</p>}
-          </div>
-
-          <div className={`flex items-center mt-1 space-x-1 ${sender ? 'flex-row-reverse' : ''}`}>
-            <span className="text-xs text-gray-500 dark:text-gray-400">{formattedTime}</span>
-            {sender && (
-              <span className="text-xs">
-                {isLastMessage ? (
-                  <FontAwesomeIcon icon={faCheckDouble} className="text-blue-400 dark:text-blue-300" />
-                ) : (
-                  <FontAwesomeIcon icon={faCheck} className="text-gray-400" />
-                )}
+          <div className={`flex flex-col ${sender ? 'items-end' : 'items-start'} relative`}>
+            {!isSameSender && (
+              <span className={`text-xs font-medium mb-1 ${sender ? 'text-blue-600' : 'text-gray-600 dark:text-gray-300'}`}>
+                {sender ? 'You' : 'Other User'}
               </span>
             )}
+
+            <div
+              className={`px-4 py-2 rounded-lg relative cursor-pointer select-none ${
+                sender
+                  ? 'bg-blue-500 text-white rounded-tr-none'
+                  : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-tl-none'
+              } ${isSameSender ? sender ? 'rounded-tr-lg' : 'rounded-tl-lg' : ''}`}
+              onContextMenu={handleLongPress}
+              onDoubleClick={handleDoubleClick}
+              onTouchStart={(e) => {
+                const touchStartTime = Date.now();
+                const timer = setTimeout(() => {
+                  if (Date.now() - touchStartTime >= 500) {
+                    handleLongPress(e);
+                  }
+                }, 500);
+                
+                e.currentTarget.addEventListener('touchend', () => {
+                  clearTimeout(timer);
+                }, { once: true });
+              }}
+            >
+              {/* Reply preview */}
+              {replyTo && (
+                <div className={`mb-2 p-2 rounded border-l-2 ${
+                  sender ? 'border-blue-300 bg-blue-400/20' : 'border-gray-400 bg-gray-300/20'
+                }`}>
+                  <p className="text-xs opacity-75">
+                    Replying to {replyTo.sender === currentUserEmail ? 'yourself' : 'other user'}
+                  </p>
+                  <p className="text-sm truncate">{replyTo.message}</p>
+                </div>
+              )}
+
+              {/* Image content */}
+              {imageUrl && (
+                <div className="mb-2">
+                  <img 
+                    src={imageUrl} 
+                    alt="Shared image" 
+                    className="max-w-full h-auto rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                    onClick={() => window.open(imageUrl, '_blank')}
+                  />
+                </div>
+              )}
+
+              {/* Text content */}
+              {text && <p className="whitespace-pre-wrap break-words">{text}</p>}
+
+              {/* Quick action buttons (visible on hover/touch) */}
+              <div className={`absolute ${sender ? 'left-0 -translate-x-full' : 'right-0 translate-x-full'} top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity bg-white dark:bg-gray-800 rounded-full shadow-lg p-1 flex gap-1`}>
+                <button
+                  onClick={() => onReply(effectiveMessageId, text, sender)}
+                  className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
+                  title="Reply"
+                >
+                  <FontAwesomeIcon icon={faReply} className="text-xs" />
+                </button>
+                <button
+                  onClick={handleDoubleClick}
+                  className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-600 dark:text-gray-300"
+                  title="React"
+                >
+                  <FontAwesomeIcon icon={faFaceSmile} className="text-xs" />
+                </button>
+              </div>
+            </div>
+
+            {/* Message reactions */}
+            <MessageReactions 
+              reactions={reactions}
+              onReactionClick={handleReactionClick}
+              currentUserEmail={currentUserEmail}
+            />
+
+            <div className={`flex items-center mt-1 space-x-1 ${sender ? 'flex-row-reverse' : ''}`}>
+              <span className="text-xs text-gray-500 dark:text-gray-400">{formattedTime}</span>
+              {sender && (
+                <span className="text-xs">
+                  {isLastMessage ? (
+                    <FontAwesomeIcon icon={faCheckDouble} className="text-blue-400 dark:text-blue-300" />
+                  ) : (
+                    <FontAwesomeIcon icon={faCheck} className="text-gray-400" />
+                  )}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      {/* Quick reaction picker */}
+      <QuickReactionPicker
+        isVisible={showQuickReactions}
+        position={reactionPosition}
+        onReactionSelect={handleReactionSelect}
+        onClose={() => setShowQuickReactions(false)}
+      />
+    </>
   );
 };
 
@@ -202,7 +430,31 @@ const ChatBox = () => {
   const { id } = router.query;
   const messagesRef = collection(db, `chats/${id}/messages`);
   const messagesQuery = query(messagesRef, orderBy('timestamp'));
-  const [messages, loadingMessages] = useCollectionData(messagesQuery);
+  
+  // Use custom hook to get messages with document IDs
+  const [messages, setMessages] = useState([]);
+  const [loadingMessages, setLoadingMessages] = useState(true);
+
+  useEffect(() => {
+    if (!id) return;
+
+    const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
+      const messagesData = [];
+      snapshot.forEach((doc) => {
+        messagesData.push({
+          id: doc.id,
+          ...doc.data()
+        });
+      });
+      setMessages(messagesData);
+      setLoadingMessages(false);
+    }, (error) => {
+      console.error("Error fetching messages:", error);
+      setLoadingMessages(false);
+    });
+
+    return () => unsubscribe();
+  }, [id]);
   const [chat, loadingChat] = useDocumentData(doc(db, `chats/${id}`));
   const scrollEnd = useRef();
   const textInputRef = useRef();
@@ -214,6 +466,7 @@ const ChatBox = () => {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [contextMenu, setContextMenu] = useState({ isVisible: false, messageId: null, position: { top: 0, left: 0 } });
 
   const handleSend = async () => {
     const trimmedText = textBox?.trim() || '';
@@ -241,18 +494,20 @@ const ChatBox = () => {
         message: trimmedText,
         sender: user.email,
         timestamp: serverTimestamp(),
-        read: false
+        read: false,
+        reactions: {}
       };
 
       if (imageUrls.length > 0) {
         messageData.images = imageUrls;
-        messageData.imageUrl = imageUrls[0]; // For backward compatibility
+        messageData.imageUrl = imageUrls[0];
       }
 
       if (replyingTo) {
         messageData.replyTo = {
           message: replyingTo.message,
-          sender: replyingTo.sender
+          sender: replyingTo.sender,
+          messageId: replyingTo.messageId
         };
       }
 
@@ -275,6 +530,134 @@ const ChatBox = () => {
     }
   };
 
+  const handleReply = (messageId, messageText, isOwnMessage) => {
+    if (!messageId) return;
+    
+    console.log('Handling reply:', { messageId, messageText, isOwnMessage });
+    
+    // Find the message using multiple matching strategies
+    const message = messages?.find((msg, index) => {
+      return msg.id === messageId ||
+             msg.timestamp?.seconds === messageId || 
+             index.toString() === messageId.toString() ||
+             `${msg.timestamp?.seconds || index}` === messageId.toString();
+    });
+    
+    setReplyingTo({
+      messageId: messageId,
+      message: messageText,
+      sender: message?.sender || (isOwnMessage ? user?.email : 'other')
+    });
+    textInputRef.current?.focus();
+  };
+
+  const handleReact = async (messageId, emoji) => {
+    if (!user?.email || !messageId) return;
+
+    try {
+      console.log('Handling reaction:', { messageId, emoji, userEmail: user.email });
+      console.log('Available messages:', messages.map(m => ({ id: m.id, timestamp: m.timestamp?.seconds })));
+      
+      // Find the message in our current messages array
+      const message = messages?.find((msg, index) => {
+        const match = msg.id === messageId || 
+               msg.timestamp?.seconds === messageId || 
+               index.toString() === messageId.toString() ||
+               `${msg.timestamp?.seconds || index}` === messageId.toString();
+        
+        if (match) {
+          console.log('Found matching message:', { msgId: msg.id, searchId: messageId, index });
+        }
+        return match;
+      });
+      
+      if (!message) {
+        console.error('Message not found for reaction. MessageId:', messageId);
+        console.error('Available message IDs:', messages.map(m => m.id));
+        setError('Message not found. Please try again.');
+        return;
+      }
+
+      console.log('Found message for reaction:', { id: message.id, timestamp: message.timestamp?.seconds });
+      
+      // Use the message ID directly
+      const docId = message.id;
+      if (!docId) {
+        console.error('No document ID available for message:', message);
+        setError('Unable to identify message. Please refresh and try again.');
+        return;
+      }
+
+      console.log('Using document ID:', docId);
+      
+      const messageRef = doc(db, `chats/${id}/messages`, docId);
+      
+      const currentReactions = message.reactions || {};
+      const currentUsersForEmoji = currentReactions[emoji] || [];
+      
+      let updatedReactions = { ...currentReactions };
+      
+      if (currentUsersForEmoji.includes(user.email)) {
+        // Remove reaction
+        updatedReactions[emoji] = currentUsersForEmoji.filter(email => email !== user.email);
+        if (updatedReactions[emoji].length === 0) {
+          delete updatedReactions[emoji];
+        }
+        console.log('Removing reaction');
+      } else {
+        // Add reaction
+        updatedReactions[emoji] = [...currentUsersForEmoji, user.email];
+        console.log('Adding reaction');
+      }
+
+      console.log('Updating reactions from:', currentReactions, 'to:', updatedReactions);
+
+      await updateDoc(messageRef, {
+        reactions: updatedReactions
+      });
+      
+      console.log('Reaction updated successfully');
+      
+      // Clear any previous errors
+      setError(null);
+    } catch (error) {
+      console.error('Error updating reaction:', error);
+      console.error('Error details:', {
+        code: error.code,
+        message: error.message,
+        stack: error.stack
+      });
+      setError(`Failed to update reaction: ${error.message}`);
+    }
+  };
+
+  const handleContextMenu = (messageId, position) => {
+    setContextMenu({
+      isVisible: true,
+      messageId,
+      position
+    });
+  };
+
+  const handleCopyMessage = () => {
+    if (!contextMenu.messageId) return;
+    
+    const message = messages?.find((msg, index) => {
+      return msg.id === contextMenu.messageId ||
+             msg.timestamp?.seconds === contextMenu.messageId || 
+             index.toString() === contextMenu.messageId.toString() ||
+             `${msg.timestamp?.seconds || index}` === contextMenu.messageId.toString();
+    });
+    if (message?.message) {
+      navigator.clipboard.writeText(message.message);
+    }
+  };
+
+  const handleDeleteMessage = async () => {
+    // Implementation for message deletion
+    console.log('Delete message:', contextMenu.messageId);
+  };
+
   const handleKeys = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -294,12 +677,10 @@ const ChatBox = () => {
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files);
     const validFiles = files.filter(file => {
-      // Check file type
       if (!file.type.startsWith('image/')) {
         setError('Please select only image files');
         return false;
       }
-      // Check file size (5MB limit)
       if (file.size > 5 * 1024 * 1024) {
         setError('Image size should be less than 5MB');
         return false;
@@ -308,7 +689,7 @@ const ChatBox = () => {
     });
 
     if (validFiles.length > 0) {
-      setSelectedFiles(prev => [...prev, ...validFiles].slice(0, 3)); // Max 3 images
+      setSelectedFiles(prev => [...prev, ...validFiles].slice(0, 3));
       setError(null);
     }
   };
@@ -461,7 +842,10 @@ const ChatBox = () => {
           <div className="space-y-1">
             {messages?.map((msg, i) => (
               <Message
-                key={`${msg.timestamp?.seconds || i}`}
+                key={`${msg.id || msg.timestamp?.seconds || i}-${i}`}
+                messageId={msg.timestamp?.seconds}
+                messageIndex={i}
+                messageDocId={msg.id}
                 sender={msg.sender === user?.email}
                 text={msg.message}
                 time={msg.timestamp}
@@ -471,12 +855,53 @@ const ChatBox = () => {
                 otherUserPhoto={null}
                 imageUrl={msg.imageUrl}
                 replyTo={msg.replyTo}
+                reactions={msg.reactions}
+                onReply={handleReply}
+                onReact={handleReact}
+                onContextMenu={handleContextMenu}
+                currentUserEmail={user?.email}
               />
             ))}
           </div>
         )}
         <div ref={scrollEnd} />
       </div>
+
+      {/* Message Context Menu */}
+      <MessageContextMenu
+        isVisible={contextMenu.isVisible}
+        position={contextMenu.position}
+        onReply={() => {
+          if (!contextMenu.messageId) return;
+          
+          const message = messages?.find((msg, index) => {
+            return msg.id === contextMenu.messageId ||
+                   msg.timestamp?.seconds === contextMenu.messageId || 
+                   index.toString() === contextMenu.messageId.toString() ||
+                   `${msg.timestamp?.seconds || index}` === contextMenu.messageId.toString();
+          });
+          if (message) {
+            handleReply(contextMenu.messageId, message.message, message.sender === user?.email);
+          }
+        }}
+        onReact={() => {
+          // Show quick reactions for the selected message
+          const messageElement = document.querySelector(`[data-message-id="${contextMenu.messageId}"]`);
+          if (messageElement) {
+            const rect = messageElement.getBoundingClientRect();
+            // Trigger reaction picker
+          }
+        }}
+        onCopy={handleCopyMessage}
+        onDelete={handleDeleteMessage}
+        onClose={() => setContextMenu({ isVisible: false, messageId: null, position: { top: 0, left: 0 } })}
+        canDelete={contextMenu.messageId ? messages?.find((msg, index) => {
+          return msg.id === contextMenu.messageId ||
+                 msg.timestamp?.seconds === contextMenu.messageId || 
+                 index.toString() === contextMenu.messageId.toString() ||
+                 `${msg.timestamp?.seconds || index}` === contextMenu.messageId.toString();
+        })?.sender === user?.email : false}
+      />
 
       {/* Reply preview */}
       {replyingTo && (
