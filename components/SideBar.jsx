@@ -1,3 +1,4 @@
+// components/SideBar.jsx - Updated with ImgBB support and better user data handling
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -21,15 +22,17 @@ import AddContact from './AddContact';
 import Logout from './Logout';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../firebaseconfig';
-import { collection, query, where, onSnapshot, doc, setDoc, serverTimestamp, addDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc, serverTimestamp, addDoc, getDoc } from 'firebase/firestore';
 import { db } from '../firebaseconfig';
 import getOtherUser from '../utlis/getOtherUser';
+import { getUserProfilePicture, handleProfilePictureError, getCombinedUserData, debugUserProfile } from '../utlis/profilePicture';
 
 const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
   const router = useRouter();
   const [user, loadingAuth, authError] = useAuthState(auth);
   const [chats, setChats] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
+  const [currentUserData, setCurrentUserData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -39,6 +42,38 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [activeTab, setActiveTab] = useState('chats');
 
+  // Get current user's Firestore data
+  useEffect(() => {
+    if (!user?.uid) {
+      setCurrentUserData(null);
+      return;
+    }
+
+    const userDocRef = doc(db, 'users', user.uid);
+    const unsubscribe = onSnapshot(
+      userDocRef,
+      (docSnapshot) => {
+        if (docSnapshot.exists()) {
+          const firestoreUserData = docSnapshot.data();
+          const combinedData = getCombinedUserData(user, firestoreUserData);
+          setCurrentUserData(combinedData);
+          
+          // Debug user profile data
+          debugUserProfile(user, firestoreUserData);
+        } else {
+          console.log('No Firestore user document found');
+          setCurrentUserData(getCombinedUserData(user, null));
+        }
+      },
+      (error) => {
+        console.error('Error fetching user document:', error);
+        setCurrentUserData(getCombinedUserData(user, null));
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user]);
+
   // Update user's online status when component mounts
   useEffect(() => {
     if (!user?.email) return;
@@ -46,14 +81,26 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
     const updateUserStatus = async () => {
       try {
         const userDocRef = doc(db, 'users', user.uid);
+        
+        // Get existing user data to preserve profile information
+        const userDoc = await getDoc(userDocRef);
+        const existingData = userDoc.exists() ? userDoc.data() : {};
+        
         await setDoc(userDocRef, {
+          uid: user.uid,
           email: user.email.toLowerCase(),
-          displayName: user.displayName || user.email.split('@')[0],
-          photoURL: user.photoURL || '',
+          displayName: existingData.displayName || user.displayName || user.email.split('@')[0],
+          photoURL: existingData.photoURL || user.photoURL || '',
+          profilePictureSource: existingData.profilePictureSource || 'unknown',
           lastSeen: serverTimestamp(),
           isOnline: true,
-          uid: user.uid
+          ...existingData, // Preserve existing data
+          // Override with current status
+          isOnline: true,
+          lastSeen: serverTimestamp()
         }, { merge: true });
+        
+        console.log('✅ User online status updated');
       } catch (error) {
         console.error('Error updating user status:', error);
       }
@@ -102,6 +149,7 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
         });
         setAllUsers(usersData);
         setUsersLoading(false);
+        console.log(`✅ Loaded ${usersData.length} users from Firestore`);
       },
       (err) => {
         console.error("Error fetching users:", err);
@@ -140,6 +188,7 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
         });
         setChats(chatsData);
         setLoading(false);
+        console.log(`✅ Loaded ${chatsData.length} chats from Firestore`);
       },
       (err) => {
         console.error("Error fetching chats:", err);
@@ -185,6 +234,7 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
       };
       
       handleChatSelection(newChat);
+      console.log('✅ New chat created with user:', selectedUser.email);
     } catch (error) {
       console.error('Error creating chat:', error);
       setError('Failed to start chat: ' + error.message);
@@ -201,21 +251,6 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
       router.push(`/chat/${chat.id}`);
     }
     setSearchQuery('');
-  };
-
-  // Function to get user profile picture with proper fallback
-  const getUserProfilePicture = (user) => {
-    if (!user) return null;
-    
-    if (user.photoURL && user.photoURL.trim() !== '') {
-      return user.photoURL;
-    }
-    
-    const initial = user.displayName ? 
-      user.displayName.charAt(0).toUpperCase() : 
-      user.email.charAt(0).toUpperCase();
-    
-    return `https://ui-avatars.com/api/?name=${initial}&background=random&color=fff&size=40`;
   };
 
   const filteredChats = chats.filter(chat => {
@@ -256,7 +291,9 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
     );
   }
 
-  const currentUserProfilePic = getUserProfilePicture(user);
+  // Use current user data (Firestore + Auth combined) for profile picture
+  const displayUserData = currentUserData || user;
+  const currentUserProfilePic = getUserProfilePicture(displayUserData, 40);
 
   return (
     <aside className='bg-gradient-to-b from-gray-700 to-gray-800 relative rounded-lg flex flex-col h-full shadow-xl shadow-gray-900/50 w-full text-left text-white p-4'>
@@ -268,20 +305,23 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
             className="flex items-center gap-x-3 cursor-pointer hover:bg-gray-600/50 rounded-lg p-2 transition-all"
             onClick={() => setShowUserMenu(!showUserMenu)}
           >
-            <img 
-              src={currentUserProfilePic} 
-              alt="User profile" 
-              className="w-10 h-10 rounded-full object-cover border-2 border-dPri"
-              onError={(e) => {
-                const initial = user.displayName ? 
-                  user.displayName.charAt(0).toUpperCase() : 
-                  user.email.charAt(0).toUpperCase();
-                e.target.src = `https://ui-avatars.com/api/?name=${initial}&background=4F46E5&color=fff&size=40`;
-              }}
-            />
+            <div className="relative">
+              <img 
+                src={currentUserProfilePic} 
+                alt="User profile" 
+                className="w-10 h-10 rounded-full object-cover border-2 border-dPri"
+                onError={(e) => handleProfilePictureError(e, displayUserData, 40)}
+              />
+              {/* Online indicator */}
+              <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-700"></div>
+            </div>
             <div>
-              <h1 className="font-medium truncate max-w-[120px]">{user.displayName || user.email.split('@')[0]}</h1>
-              <p className="text-xs text-gray-300">Online</p>
+              <h1 className="font-medium truncate max-w-[120px]">
+                {displayUserData.displayName || user.email.split('@')[0]}
+              </h1>
+              <p className="text-xs text-gray-300">
+                {currentUserData?.profilePictureSource === 'imgbb' ? 'Custom Avatar' : 'Online'}
+              </p>
             </div>
           </div>
 
@@ -297,6 +337,16 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
                   {darkMode ? 'Light Mode' : 'Dark Mode'}
                 </button>
               )}
+              <button 
+                className="w-full px-4 py-2 text-left hover:bg-gray-600 flex items-center gap-2"
+                onClick={() => {
+                  console.log('Current user profile data:', displayUserData);
+                  debugUserProfile(user, currentUserData);
+                }}
+              >
+                <FontAwesomeIcon icon={faUser} />
+                Debug Profile
+              </button>
               <button 
                 className="w-full px-4 py-2 text-left hover:bg-gray-600 flex items-center gap-2"
                 onClick={() => {
@@ -475,7 +525,7 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
                   chat.users.includes(userData.email.toLowerCase())
                 );
 
-                const userProfilePic = getUserProfilePicture(userData);
+                const userProfilePic = getUserProfilePicture(userData, 40);
 
                 return (
                   <div
@@ -487,12 +537,7 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
                       src={userProfilePic} 
                       alt="User profile" 
                       className="w-10 h-10 rounded-full object-cover"
-                      onError={(e) => {
-                        const initial = userData.displayName ? 
-                          userData.displayName.charAt(0).toUpperCase() : 
-                          userData.email.charAt(0).toUpperCase();
-                        e.target.src = `https://ui-avatars.com/api/?name=${initial}&background=4F46E5&color=fff&size=40`;
-                      }}
+                      onError={(e) => handleProfilePictureError(e, userData, 40)}
                     />
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between">
@@ -502,6 +547,11 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
                         {existingChat && (
                           <span className="text-xs bg-dPri text-white px-2 py-1 rounded-full">
                             Connected
+                          </span>
+                        )}
+                        {userData.profilePictureSource === 'imgbb' && (
+                          <span className="text-xs bg-green-600 text-white px-2 py-1 rounded-full ml-1">
+                            📷
                           </span>
                         )}
                       </div>
@@ -532,7 +582,7 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
               : `${filteredUsers.length} ${filteredUsers.length === 1 ? 'user' : 'users'}`
             }
           </span>
-          <span>v1.0.0</span>
+          <span>ImgBB Ready</span>
         </div>
       </div>
     </aside>

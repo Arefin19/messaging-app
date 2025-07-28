@@ -1,4 +1,4 @@
-// components/Login.jsx - Complete fix with Firestore integration
+// components/Login.jsx - Updated with ImgBB integration
 import React, { useState } from 'react';
 import Head from 'next/head';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -10,10 +10,15 @@ import {
   updateProfile,
   onAuthStateChanged 
 } from 'firebase/auth';
-import { auth, storage, db } from '../firebaseconfig';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { auth, db } from '../firebaseconfig';
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
 import { useRouter } from 'next/router';
+import { 
+  uploadToImgBB, 
+  validateImageFile, 
+  createImagePreview, 
+  generateFallbackAvatar 
+} from '../utlis/imgbbUpload';
 
 const Login = () => {
     const [email, setEmail] = useState('');
@@ -26,6 +31,9 @@ const Login = () => {
     const [isLoading, setIsLoading] = useState(false);
     const [uploadProgress, setUploadProgress] = useState('');
     const router = useRouter();
+
+    // ImgBB API key - You need to get this from https://api.imgbb.com/
+    const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || 'YOUR_IMGBB_API_KEY_HERE';
 
     const addProgress = (message) => {
         console.log('PROGRESS:', message);
@@ -54,6 +62,10 @@ const Login = () => {
                 if (username.length < 3) {
                     throw new Error('Username must be at least 3 characters');
                 }
+
+                if (!IMGBB_API_KEY || IMGBB_API_KEY === 'YOUR_IMGBB_API_KEY_HERE') {
+                    throw new Error('ImgBB API key is not configured. Please add NEXT_PUBLIC_IMGBB_API_KEY to your environment variables.');
+                }
                 
                 // Create user account
                 addProgress('Creating user account...');
@@ -63,67 +75,35 @@ const Login = () => {
                 
                 let finalPhotoURL = null;
                 
-                // Handle profile picture upload
+                // Handle profile picture upload to ImgBB
                 if (profilePic) {
                     try {
-                        addProgress('Starting profile picture upload...');
+                        addProgress('Starting profile picture upload to ImgBB...');
                         addProgress(`File details: ${profilePic.name}, ${(profilePic.size / 1024).toFixed(1)}KB, ${profilePic.type}`);
                         
-                        // Create storage reference with timestamp for uniqueness
-                        const timestamp = Date.now();
-                        const fileExtension = profilePic.name.split('.').pop().toLowerCase();
-                        const fileName = `profile_${timestamp}.${fileExtension}`;
-                        const storagePath = `profilePictures/${user.uid}/${fileName}`;
-                        
-                        addProgress(`Upload path: ${storagePath}`);
-                        
-                        const storageRef = ref(storage, storagePath);
-                        
-                        // Upload file with metadata
-                        addProgress('Uploading file to Firebase Storage...');
-                        const metadata = {
-                            contentType: profilePic.type,
-                            customMetadata: {
-                                'uploadedBy': user.uid,
-                                'uploadedAt': new Date().toISOString(),
-                                'originalName': profilePic.name
-                            }
-                        };
-                        
-                        const uploadResult = await uploadBytes(storageRef, profilePic, metadata);
-                        addProgress('File uploaded successfully');
-                        console.log('Upload result:', uploadResult);
-                        
-                        // Get download URL
-                        addProgress('Getting download URL...');
-                        finalPhotoURL = await getDownloadURL(storageRef);
-                        addProgress(`Download URL obtained: ${finalPhotoURL}`);
-                        
-                        // Test the URL immediately
-                        addProgress('Testing uploaded image URL...');
-                        await testImageURL(finalPhotoURL);
-                        addProgress('✅ Image URL test passed');
-                        
-                    } catch (uploadError) {
-                        console.error('Profile picture upload failed:', uploadError);
-                        addProgress(`❌ Upload failed: ${uploadError.message}`);
-                        
-                        // Log detailed error information
-                        if (uploadError.code) {
-                            addProgress(`Error code: ${uploadError.code}`);
+                        // Validate file again before upload
+                        const validation = validateImageFile(profilePic);
+                        if (!validation.isValid) {
+                            throw new Error(validation.error);
                         }
                         
-                        // Don't fail the entire signup for image upload failure
-                        setError('Account created but profile picture upload failed. You can update it later in settings.');
-                        finalPhotoURL = null;
+                        addProgress('Uploading to ImgBB...');
+                        finalPhotoURL = await uploadToImgBB(profilePic, IMGBB_API_KEY);
+                        addProgress(`✅ Image uploaded successfully to ImgBB: ${finalPhotoURL}`);
+                        
+                    } catch (uploadError) {
+                        console.error('ImgBB upload failed:', uploadError);
+                        addProgress(`❌ ImgBB upload failed: ${uploadError.message}`);
+                        
+                        // Use fallback avatar if upload fails
+                        setError('Profile picture upload failed, but account was created. Using default avatar.');
+                        finalPhotoURL = generateFallbackAvatar(username, 200);
+                        addProgress(`Using fallback avatar: ${finalPhotoURL}`);
                     }
-                }
-                
-                // Create fallback avatar if no profile picture or upload failed
-                if (!finalPhotoURL) {
-                    const encodedName = encodeURIComponent(username);
-                    finalPhotoURL = `https://ui-avatars.com/api/?name=${encodedName}&background=4F46E5&color=fff&size=200&bold=true`;
-                    addProgress(`Using fallback avatar: ${finalPhotoURL}`);
+                } else {
+                    // Generate fallback avatar if no image selected
+                    finalPhotoURL = generateFallbackAvatar(username, 200);
+                    addProgress(`No profile picture selected. Using fallback avatar: ${finalPhotoURL}`);
                 }
                 
                 // Update Firebase Auth profile
@@ -134,7 +114,7 @@ const Login = () => {
                 });
                 addProgress('✅ Firebase Auth profile updated successfully');
                 
-                // Create/Update Firestore user document
+                // Create/Update Firestore user document with ImgBB URL
                 addProgress('Creating Firestore user document...');
                 try {
                     const userDocRef = doc(db, 'users', user.uid);
@@ -143,6 +123,7 @@ const Login = () => {
                         email: user.email.toLowerCase(),
                         displayName: username,
                         photoURL: finalPhotoURL,
+                        profilePictureSource: profilePic ? 'imgbb' : 'fallback',
                         isOnline: true,
                         lastSeen: serverTimestamp(),
                         createdAt: serverTimestamp(),
@@ -178,16 +159,6 @@ const Login = () => {
                     addProgress('⚠️ Profile update verification failed');
                     addProgress(`Expected: name="${username}", photo="${finalPhotoURL}"`);
                     addProgress(`Actual: name="${updatedUser.displayName}", photo="${updatedUser.photoURL}"`);
-                }
-                
-                // Final verification - test the photoURL one more time
-                if (updatedUser.photoURL) {
-                    try {
-                        await testImageURL(updatedUser.photoURL);
-                        addProgress('✅ Final image URL verification passed');
-                    } catch (testError) {
-                        addProgress(`⚠️ Final image URL test failed: ${testError.message}`);
-                    }
                 }
                 
                 // Set up auth state listener for navigation
@@ -226,9 +197,6 @@ const Login = () => {
                 'auth/wrong-password': 'Incorrect password. Please try again.',
                 'auth/too-many-requests': 'Too many failed attempts. Please try again later.',
                 'auth/network-request-failed': 'Network error. Please check your internet connection.',
-                'storage/unauthorized': 'Upload failed: Storage permissions denied. Please contact support.',
-                'storage/canceled': 'Upload was canceled.',
-                'storage/unknown': 'Upload failed due to an unknown error.',
             };
             
             setError(errorMessages[err.code] || err.message);
@@ -240,36 +208,7 @@ const Login = () => {
         }
     };
 
-    // Helper function to test if an image URL is accessible
-    const testImageURL = (url) => {
-        return new Promise((resolve, reject) => {
-            if (!url) {
-                reject(new Error('No URL provided'));
-                return;
-            }
-            
-            const img = new Image();
-            img.onload = () => {
-                console.log('✅ Image loaded successfully:', url);
-                resolve(true);
-            };
-            img.onerror = (error) => {
-                console.error('❌ Image failed to load:', url, error);
-                reject(new Error('Image URL not accessible'));
-            };
-            
-            // Set crossOrigin to handle CORS
-            img.crossOrigin = 'anonymous';
-            img.src = url;
-            
-            // Timeout after 15 seconds
-            setTimeout(() => {
-                reject(new Error('Image load timeout'));
-            }, 15000);
-        });
-    };
-
-    const handleImageChange = (e) => {
+    const handleImageChange = async (e) => {
         const file = e.target.files[0];
         if (file) {
             console.log('File selected:', {
@@ -280,21 +219,9 @@ const Login = () => {
             });
             
             // Validate file
-            if (!file.type.startsWith('image/')) {
-                setError('Please select an image file');
-                return;
-            }
-            
-            if (file.size > 5 * 1024 * 1024) { // 5MB limit
-                setError('Image size should be less than 5MB');
-                return;
-            }
-            
-            // Validate file extension
-            const allowedExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp'];
-            const fileExtension = file.name.split('.').pop()?.toLowerCase();
-            if (!allowedExtensions.includes(fileExtension)) {
-                setError('Please select a valid image format (JPG, PNG, GIF, WebP)');
+            const validation = validateImageFile(file);
+            if (!validation.isValid) {
+                setError(validation.error);
                 return;
             }
 
@@ -302,16 +229,14 @@ const Login = () => {
             setError(null);
             
             // Create preview
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setPreviewImage(reader.result);
+            try {
+                const preview = await createImagePreview(file);
+                setPreviewImage(preview);
                 console.log('✅ Preview created successfully');
-            };
-            reader.onerror = () => {
-                console.error('❌ Failed to create preview');
+            } catch (previewError) {
+                console.error('❌ Failed to create preview:', previewError);
                 setError('Failed to process image file');
-            };
-            reader.readAsDataURL(file);
+            }
         }
     };
 
@@ -484,10 +409,12 @@ const Login = () => {
                         </button>
                     </div>
 
-                    {/* Debug note */}
-                    {!isLogin && (
-                        <div className="mt-4 text-xs text-gray-400">
-                            Having issues? Check the browser console for detailed logs.
+                    {/* API Key notice */}
+                    {!isLogin && (!IMGBB_API_KEY || IMGBB_API_KEY === 'YOUR_IMGBB_API_KEY_HERE') && (
+                        <div className="mt-4 text-xs text-yellow-400 bg-yellow-900/20 p-2 rounded border border-yellow-400/30">
+                            ⚠️ ImgBB API key not configured. Profile pictures will use fallback avatars.
+                            <br />
+                            Get your free API key from <a href="https://api.imgbb.com/" target="_blank" rel="noopener noreferrer" className="underline">api.imgbb.com</a>
                         </div>
                     )}
                 </div>
