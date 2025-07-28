@@ -549,11 +549,7 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
                             Connected
                           </span>
                         )}
-                        {userData.profilePictureSource === 'imgbb' && (
-                          <span className="text-xs bg-green-600 text-white px-2 py-1 rounded-full ml-1">
-                            📷
-                          </span>
-                        )}
+                        
                       </div>
                       <p className="text-xs text-gray-400 truncate">
                         {userData.email}
@@ -582,7 +578,7 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
               : `${filteredUsers.length} ${filteredUsers.length === 1 ? 'user' : 'users'}`
             }
           </span>
-          <span>ImgBB Ready</span>
+          <span>v 0.0.2</span>
         </div>
       </div>
     </aside>
