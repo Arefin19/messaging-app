@@ -25,7 +25,7 @@ import { collection, query, where, onSnapshot, doc, setDoc, serverTimestamp, add
 import { db } from '../firebaseconfig';
 import getOtherUser from '../utlis/getOtherUser';
 
-const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) => {
+const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
   const router = useRouter();
   const [user, loadingAuth, authError] = useAuthState(auth);
   const [chats, setChats] = useState([]);
@@ -38,31 +38,13 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
   const [searchQuery, setSearchQuery] = useState('');
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [activeTab, setActiveTab] = useState('chats');
-  const [debugInfo, setDebugInfo] = useState({});
-
-  // Debug authentication state
-  useEffect(() => {
-    console.log('Auth State:', { user: user?.email, loadingAuth, authError });
-    setDebugInfo(prev => ({
-      ...prev,
-      authState: { 
-        userEmail: user?.email, 
-        loadingAuth, 
-        authError: authError?.message 
-      }
-    }));
-  }, [user, loadingAuth, authError]);
 
   // Update user's online status when component mounts
   useEffect(() => {
-    if (!user?.email) {
-      console.log('No user email, skipping status update');
-      return;
-    }
+    if (!user?.email) return;
 
     const updateUserStatus = async () => {
       try {
-        console.log('Updating user status for:', user.email);
         const userDocRef = doc(db, 'users', user.uid);
         await setDoc(userDocRef, {
           email: user.email.toLowerCase(),
@@ -72,24 +54,13 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
           isOnline: true,
           uid: user.uid
         }, { merge: true });
-        console.log('User status updated successfully');
-        
-        setDebugInfo(prev => ({
-          ...prev,
-          userStatusUpdate: 'Success'
-        }));
       } catch (error) {
         console.error('Error updating user status:', error);
-        setDebugInfo(prev => ({
-          ...prev,
-          userStatusUpdate: error.message
-        }));
       }
     };
 
     updateUserStatus();
 
-    // Update status when user goes offline
     const handleBeforeUnload = async () => {
       try {
         const userDocRef = doc(db, 'users', user.uid);
@@ -109,24 +80,19 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
   // Fetch all users from Firestore
   useEffect(() => {
     if (!user?.email) {
-      console.log('No user email, skipping users fetch');
       setUsersLoading(false);
       return;
     }
 
-    console.log('Starting to fetch users...');
     setUsersLoading(true);
     const usersRef = collection(db, 'users');
     
     const unsubscribeUsers = onSnapshot(
       usersRef,
       (querySnapshot) => {
-        console.log('Users snapshot received, size:', querySnapshot.size);
         const usersData = [];
         querySnapshot.forEach((doc) => {
           const userData = doc.data();
-          console.log('User document:', { id: doc.id, ...userData });
-          // Exclude current user from the list
           if (userData.email !== user.email.toLowerCase()) {
             usersData.push({ 
               id: doc.id, 
@@ -134,46 +100,26 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
             });
           }
         });
-        console.log('Filtered users data:', usersData);
         setAllUsers(usersData);
         setUsersLoading(false);
-        
-        setDebugInfo(prev => ({
-          ...prev,
-          usersQuery: {
-            totalDocs: querySnapshot.size,
-            filteredUsers: usersData.length,
-            currentUserEmail: user.email.toLowerCase()
-          }
-        }));
       },
       (err) => {
         console.error("Error fetching users:", err);
         setError('Failed to load users: ' + err.message);
         setUsersLoading(false);
-        
-        setDebugInfo(prev => ({
-          ...prev,
-          usersQueryError: err.message
-        }));
       }
     );
 
-    return () => {
-      console.log('Unsubscribing from users listener');
-      unsubscribeUsers();
-    };
+    return () => unsubscribeUsers();
   }, [user]);
 
   // Fetch existing chats
   useEffect(() => {
     if (!user?.email) {
-      console.log('No user email, skipping chats fetch');
       setLoading(false);
       return;
     }
 
-    console.log('Starting to fetch chats for user:', user.email.toLowerCase());
     setLoading(true);
     const q = query(
       collection(db, 'chats'),
@@ -183,53 +129,31 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
     const unsubscribe = onSnapshot(
       q,
       (querySnapshot) => {
-        console.log('Chats snapshot received, size:', querySnapshot.size);
         const chatsData = [];
         querySnapshot.forEach((doc) => {
           const chatData = doc.data();
-          console.log('Chat document:', { id: doc.id, ...chatData });
           chatsData.push({ 
             id: doc.id, 
             ...chatData,
             users: chatData.users.map(email => email?.toLowerCase())
           });
         });
-        console.log('Processed chats data:', chatsData);
         setChats(chatsData);
         setLoading(false);
-        
-        setDebugInfo(prev => ({
-          ...prev,
-          chatsQuery: {
-            totalDocs: querySnapshot.size,
-            chatsData: chatsData.length,
-            queryEmail: user.email.toLowerCase()
-          }
-        }));
       },
       (err) => {
         console.error("Error fetching chats:", err);
         setError('Failed to load chats: ' + err.message);
         setLoading(false);
-        
-        setDebugInfo(prev => ({
-          ...prev,
-          chatsQueryError: err.message
-        }));
       }
     );
 
-    return () => {
-      console.log('Unsubscribing from chats listener');
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, [user]);
 
   // Create or get existing chat with a user
   const startChatWithUser = async (selectedUser) => {
     try {
-      console.log('Starting chat with user:', selectedUser.email);
-      
       // Check if chat already exists
       const existingChat = chats.find(chat => 
         chat.users.includes(selectedUser.email.toLowerCase()) && 
@@ -237,13 +161,11 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
       );
 
       if (existingChat) {
-        console.log('Found existing chat:', existingChat.id);
         handleChatSelection(existingChat);
         return;
       }
 
-      console.log('Creating new chat...');
-      // Create new chat using the same structure as AddContact
+      // Create new chat
       const newChatData = {
         users: [user.email.toLowerCase(), selectedUser.email.toLowerCase()],
         userEmails: {
@@ -251,13 +173,12 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
           [selectedUser.email.toLowerCase()]: true
         },
         createdAt: serverTimestamp(),
-        lastUpdated: serverTimestamp()
+        lastUpdated: serverTimestamp(),
+        lastMessage: ''
       };
 
       const docRef = await addDoc(collection(db, "chats"), newChatData);
-      console.log('New chat created with ID:', docRef.id);
       
-      // Set the new chat as selected
       const newChat = {
         id: docRef.id,
         ...newChatData
@@ -270,28 +191,26 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
     }
   };
 
-  // Handle chat selection - works for both with and without setSelectedChat prop
+  // Handle chat selection - always navigate to chat page
   const handleChatSelection = (chat) => {
-    if (setSelectedChat) {
-      // If we're on the home page with setSelectedChat prop
-      setSelectedChat(chat);
-      setSearchQuery('');
+    if (onChatSelect) {
+      // If onChatSelect prop is provided, use it
+      onChatSelect(chat);
     } else {
-      // If we're on a chat page, navigate to the chat
+      // Otherwise, navigate directly
       router.push(`/chat/${chat.id}`);
     }
+    setSearchQuery('');
   };
 
   // Function to get user profile picture with proper fallback
   const getUserProfilePicture = (user) => {
     if (!user) return null;
     
-    // Check if photoURL exists and is a valid URL
     if (user.photoURL && user.photoURL.trim() !== '') {
       return user.photoURL;
     }
     
-    // Generate a fallback avatar using the user's initial
     const initial = user.displayName ? 
       user.displayName.charAt(0).toUpperCase() : 
       user.email.charAt(0).toUpperCase();
@@ -324,25 +243,14 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
     );
   }
 
-  // Show error if auth failed
-  if (authError) {
+  if (authError || !user) {
     return (
       <aside className='bg-gradient-to-b from-gray-700 to-gray-800 rounded-lg flex flex-col h-full shadow-xl shadow-gray-900/50 w-full text-left text-lg text-white p-4'>
         <div className="flex items-center justify-center h-full">
           <div className="text-center">
             <FontAwesomeIcon icon={faExclamationTriangle} className="text-2xl text-red-400 mb-2" />
-            <p className='text-red-400'>Authentication Error: {authError.message}</p>
+            <p className='text-red-400'>{authError?.message || 'Please log in to view chats'}</p>
           </div>
-        </div>
-      </aside>
-    );
-  }
-
-  if (!user) {
-    return (
-      <aside className='bg-gradient-to-b from-gray-700 to-gray-800 rounded-lg flex flex-col h-full shadow-xl shadow-gray-900/50 w-full text-left text-lg text-white p-4'>
-        <div className="flex items-center justify-center h-full">
-          <p className='text-gray-300'>Please log in to view chats</p>
         </div>
       </aside>
     );
@@ -365,7 +273,6 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
               alt="User profile" 
               className="w-10 h-10 rounded-full object-cover border-2 border-dPri"
               onError={(e) => {
-                // If image fails to load, use initials fallback
                 const initial = user.displayName ? 
                   user.displayName.charAt(0).toUpperCase() : 
                   user.email.charAt(0).toUpperCase();
@@ -381,13 +288,15 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
           {/* User Menu Dropdown */}
           {showUserMenu && (
             <div className="absolute left-4 top-20 bg-gray-700 rounded-lg shadow-lg z-50 w-48 overflow-hidden">
-              <button 
-                className="w-full px-4 py-2 text-left hover:bg-gray-600 flex items-center gap-2"
-                onClick={toggleDarkMode}
-              >
-                <FontAwesomeIcon icon={darkMode ? faSun : faMoon} />
-                {darkMode ? 'Light Mode' : 'Dark Mode'}
-              </button>
+              {toggleDarkMode && (
+                <button 
+                  className="w-full px-4 py-2 text-left hover:bg-gray-600 flex items-center gap-2"
+                  onClick={toggleDarkMode}
+                >
+                  <FontAwesomeIcon icon={darkMode ? faSun : faMoon} />
+                  {darkMode ? 'Light Mode' : 'Dark Mode'}
+                </button>
+              )}
               <button 
                 className="w-full px-4 py-2 text-left hover:bg-gray-600 flex items-center gap-2"
                 onClick={() => {
@@ -466,7 +375,7 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
         </Button>
       )}
 
-      {/* Add Contact Modal */}
+      {/* Modals */}
       <Modal showItem={showAddContact} setShowItem={setShowAddContact}>
         <AddContact 
           setShowItem={setShowAddContact} 
@@ -474,7 +383,6 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
         />
       </Modal>
 
-      {/* Logout Modal */}
       <Modal showItem={showLogoutPop} setShowItem={setShowLogoutPop}>
         <Logout setShowItem={setShowLogoutPop} />
       </Modal>
@@ -492,7 +400,6 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
               <div className="text-center py-4">
                 <FontAwesomeIcon icon={faExclamationTriangle} className="text-red-400 text-2xl mb-2" />
                 <p className="text-red-400 text-sm">{error}</p>
-                <p className="text-gray-400 text-xs mt-2">Check console for details</p>
               </div>
             ) : filteredChats.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center text-gray-400">
@@ -509,7 +416,7 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
                 ) : (
                   <>
                     <p className="mb-2">No chats yet</p>
-                    
+                    <p className="text-xs">Click "New Chat" or select a user to start messaging</p>
                   </>
                 )}
               </div>
@@ -542,7 +449,6 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
               <div className="text-center py-4">
                 <FontAwesomeIcon icon={faExclamationTriangle} className="text-red-400 text-2xl mb-2" />
                 <p className="text-red-400 text-sm">{error}</p>
-                <p className="text-gray-400 text-xs mt-2">Check console for details</p>
               </div>
             ) : filteredUsers.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-center text-gray-400">
@@ -565,7 +471,6 @@ const SideBar = ({ setSelectedChat, darkMode, toggleDarkMode, activeChatId }) =>
               </div>
             ) : (
               filteredUsers.map((userData) => {
-                // Check if chat already exists with this user
                 const existingChat = chats.find(chat => 
                   chat.users.includes(userData.email.toLowerCase())
                 );
