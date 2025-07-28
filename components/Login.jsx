@@ -376,13 +376,7 @@ const Login = () => {
                             </div>
                         )}
 
-                        {/* Progress Information */}
-                        {uploadProgress && !isLogin && (
-                            <div className='text-xs text-green-300 bg-green-900/20 p-3 rounded-lg border border-green-400/30 text-left max-h-40 overflow-y-auto'>
-                                <div className="font-semibold mb-1">Signup Progress:</div>
-                                <pre className="whitespace-pre-wrap font-mono">{uploadProgress}</pre>
-                            </div>
-                        )}
+                        
 
                         <Button 
                             type="submit" 

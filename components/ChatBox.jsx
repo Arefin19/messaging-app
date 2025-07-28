@@ -19,11 +19,16 @@ import {
 import { useRouter } from 'next/router';
 import { useCollectionData, useDocumentData } from 'react-firebase-hooks/firestore';
 import { addDoc, collection, doc, orderBy, query, serverTimestamp, updateDoc, onSnapshot } from 'firebase/firestore';
-import { db, auth, storage } from '../firebaseconfig';
+import { db, auth } from '../firebaseconfig';
 import { useAuthState } from 'react-firebase-hooks/auth';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import getOtherUser from '../utlis/getOtherUser';
 import { getUserProfilePicture, handleProfilePictureError } from '../utlis/profilePicture';
+import { 
+  uploadToImgBB, 
+  validateImageFile, 
+  createImagePreview, 
+  generateFallbackAvatar 
+} from '../utlis/imgbbUpload';
 
 // Simple emoji picker component
 const EmojiPicker = ({ onEmojiSelect, onClose, isVisible }) => {
@@ -176,8 +181,8 @@ const MessageContextMenu = ({
   );
 };
 
-// Image preview component
-const ImagePreview = ({ file, onRemove }) => {
+// Enhanced Image preview component with upload progress
+const ImagePreview = ({ file, onRemove, uploadProgress = null, isUploading = false }) => {
   const [preview, setPreview] = useState(null);
 
   useEffect(() => {
@@ -195,14 +200,30 @@ const ImagePreview = ({ file, onRemove }) => {
       <img 
         src={preview} 
         alt="Preview" 
-        className="w-20 h-20 object-cover rounded-lg border border-gray-300"
+        className={`w-20 h-20 object-cover rounded-lg border border-gray-300 ${isUploading ? 'opacity-60' : ''}`}
       />
-      <button
-        onClick={onRemove}
-        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600"
-      >
-        <FontAwesomeIcon icon={faTimes} />
-      </button>
+      
+      {/* Upload progress overlay */}
+      {isUploading && (
+        <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center">
+          <div className="text-center">
+            <FontAwesomeIcon icon={faSpinner} className="text-white animate-spin mb-1" />
+            <div className="text-xs text-white">
+              {uploadProgress || 'Uploading...'}
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {/* Remove button */}
+      {!isUploading && (
+        <button
+          onClick={onRemove}
+          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600"
+        >
+          <FontAwesomeIcon icon={faTimes} />
+        </button>
+      )}
     </div>
   );
 };
@@ -247,6 +268,7 @@ const Message = ({
   userPhoto, 
   otherUserPhoto, 
   imageUrl, 
+  images,
   replyTo,
   reactions,
   onReply,
@@ -289,6 +311,9 @@ const Message = ({
     console.log('Clicking reaction:', emoji, 'for message:', effectiveMessageId);
     onReact(effectiveMessageId, emoji);
   };
+
+  // Get all images (support both single imageUrl and multiple images array)
+  const allImages = images && images.length > 0 ? images : (imageUrl ? [imageUrl] : []);
 
   return (
     <>
@@ -355,15 +380,35 @@ const Message = ({
                 </div>
               )}
 
-              {/* Image content */}
-              {imageUrl && (
+              {/* Images content */}
+              {allImages.length > 0 && (
                 <div className="mb-2">
-                  <img 
-                    src={imageUrl} 
-                    alt="Shared image" 
-                    className="max-w-full h-auto rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
-                    onClick={() => window.open(imageUrl, '_blank')}
-                  />
+                  {allImages.length === 1 ? (
+                    <img 
+                      src={allImages[0]} 
+                      alt="Shared image" 
+                      className="max-w-full h-auto rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
+                      onClick={() => window.open(allImages[0], '_blank')}
+                    />
+                  ) : (
+                    <div className="grid grid-cols-2 gap-1">
+                      {allImages.slice(0, 4).map((img, index) => (
+                        <div key={index} className="relative">
+                          <img 
+                            src={img} 
+                            alt={`Shared image ${index + 1}`} 
+                            className="w-full h-20 object-cover rounded cursor-pointer hover:opacity-90 transition-opacity"
+                            onClick={() => window.open(img, '_blank')}
+                          />
+                          {index === 3 && allImages.length > 4 && (
+                            <div className="absolute inset-0 bg-black bg-opacity-60 rounded flex items-center justify-center text-white font-bold">
+                              +{allImages.length - 4}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -455,6 +500,7 @@ const ChatBox = () => {
 
     return () => unsubscribe();
   }, [id]);
+  
   const [chat, loadingChat] = useDocumentData(doc(db, `chats/${id}`));
   const scrollEnd = useRef();
   const textInputRef = useRef();
@@ -466,7 +512,11 @@ const ChatBox = () => {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [contextMenu, setContextMenu] = useState({ isVisible: false, messageId: null, position: { top: 0, left: 0 } });
+
+  // ImgBB API key - You need to get this from https://api.imgbb.com/
+  const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || 'YOUR_IMGBB_API_KEY_HERE';
 
   const handleSend = async () => {
     const trimmedText = textBox?.trim() || '';
@@ -475,21 +525,46 @@ const ChatBox = () => {
     try {
       setIsSending(true);
       setError(null);
+      setUploadProgress('');
 
       let imageUrls = [];
 
-      // Upload images if any
+      // Upload images to ImgBB if any
       if (selectedFiles.length > 0) {
+        if (!IMGBB_API_KEY || IMGBB_API_KEY === 'YOUR_IMGBB_API_KEY_HERE') {
+          throw new Error('ImgBB API key is not configured. Please add NEXT_PUBLIC_IMGBB_API_KEY to your environment variables.');
+        }
+
         setIsUploading(true);
-        for (const file of selectedFiles) {
-          const storageRef = ref(storage, `chat-images/${id}/${Date.now()}-${file.name}`);
-          await uploadBytes(storageRef, file);
-          const downloadURL = await getDownloadURL(storageRef);
-          imageUrls.push(downloadURL);
+        setUploadProgress('Starting image upload...');
+        
+        for (let i = 0; i < selectedFiles.length; i++) {
+          const file = selectedFiles[i];
+          try {
+            setUploadProgress(`Uploading image ${i + 1} of ${selectedFiles.length}...`);
+            console.log(`Uploading image ${i + 1}:`, file.name);
+            
+            // Validate file before upload
+            const validation = validateImageFile(file);
+            if (!validation.isValid) {
+              throw new Error(`Invalid file ${file.name}: ${validation.error}`);
+            }
+            
+            const imageUrl = await uploadToImgBB(file, IMGBB_API_KEY);
+            imageUrls.push(imageUrl);
+            console.log(`✅ Image ${i + 1} uploaded successfully:`, imageUrl);
+            
+          } catch (uploadError) {
+            console.error(`Failed to upload image ${i + 1}:`, uploadError);
+            throw new Error(`Failed to upload ${file.name}: ${uploadError.message}`);
+          }
         }
         setIsUploading(false);
+        setUploadProgress('Images uploaded successfully!');
+        console.log('✅ All images uploaded to ImgBB:', imageUrls);
       }
 
+      // Create message data
       const messageData = {
         message: trimmedText,
         sender: user.email,
@@ -498,11 +573,14 @@ const ChatBox = () => {
         reactions: {}
       };
 
+      // Add image data if available
       if (imageUrls.length > 0) {
         messageData.images = imageUrls;
-        messageData.imageUrl = imageUrls[0];
+        messageData.imageUrl = imageUrls[0]; // Keep for backward compatibility
+        messageData.imageUploadSource = 'imgbb';
       }
 
+      // Add reply data if replying
       if (replyingTo) {
         messageData.replyTo = {
           message: replyingTo.message,
@@ -511,19 +589,26 @@ const ChatBox = () => {
         };
       }
 
+      // Save message to Firestore
+      setUploadProgress('Saving message...');
       await addDoc(messagesRef, messageData);
 
+      // Update chat's last message
       await updateDoc(doc(db, `chats/${id}`), {
         lastUpdated: serverTimestamp(),
-        lastMessage: trimmedText || '📷 Image'
+        lastMessage: trimmedText || `📷 ${imageUrls.length > 1 ? `${imageUrls.length} Images` : 'Image'}`
       });
 
+      // Reset form
       setTextBox('');
       setReplyingTo(null);
       setSelectedFiles([]);
+      setUploadProgress('');
+      console.log('✅ Message sent successfully');
+
     } catch (err) {
       console.error("Error sending message:", err);
-      setError('Failed to send message. Please try again.');
+      setError(`Failed to send message: ${err.message}`);
     } finally {
       setIsSending(false);
       setIsUploading(false);
@@ -676,26 +761,44 @@ const ChatBox = () => {
 
   const handleFileSelect = (e) => {
     const files = Array.from(e.target.files);
-    const validFiles = files.filter(file => {
-      if (!file.type.startsWith('image/')) {
-        setError('Please select only image files');
-        return false;
+    const validFiles = [];
+    let hasErrors = false;
+
+    files.forEach(file => {
+      const validation = validateImageFile(file);
+      if (validation.isValid) {
+        validFiles.push(file);
+      } else {
+        console.error(`Invalid file ${file.name}:`, validation.error);
+        setError(`${file.name}: ${validation.error}`);
+        hasErrors = true;
       }
-      if (file.size > 5 * 1024 * 1024) {
-        setError('Image size should be less than 5MB');
-        return false;
-      }
-      return true;
     });
 
     if (validFiles.length > 0) {
-      setSelectedFiles(prev => [...prev, ...validFiles].slice(0, 3));
-      setError(null);
+      // Limit to maximum 5 images
+      const totalFiles = selectedFiles.length + validFiles.length;
+      if (totalFiles > 5) {
+        setError('Maximum 5 images allowed per message');
+        const allowedCount = 5 - selectedFiles.length;
+        setSelectedFiles(prev => [...prev, ...validFiles.slice(0, allowedCount)]);
+      } else {
+        setSelectedFiles(prev => [...prev, ...validFiles]);
+        if (!hasErrors) {
+          setError(null);
+        }
+      }
     }
+
+    // Reset file input
+    e.target.value = '';
   };
 
   const removeFile = (index) => {
     setSelectedFiles(prev => prev.filter((_, i) => i !== index));
+    if (selectedFiles.length <= 1) {
+      setError(null); // Clear errors when removing files
+    }
   };
 
   useEffect(() => {
@@ -854,6 +957,7 @@ const ChatBox = () => {
                 userPhoto={currentUserProfilePic}
                 otherUserPhoto={null}
                 imageUrl={msg.imageUrl}
+                images={msg.images}
                 replyTo={msg.replyTo}
                 reactions={msg.reactions}
                 onReply={handleReply}
@@ -931,10 +1035,17 @@ const ChatBox = () => {
               <ImagePreview 
                 key={index} 
                 file={file} 
-                onRemove={() => removeFile(index)} 
+                onRemove={() => removeFile(index)}
+                uploadProgress={uploadProgress}
+                isUploading={isUploading}
               />
             ))}
           </div>
+          {selectedFiles.length > 0 && (
+            <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">
+              {selectedFiles.length}/5 images selected
+            </div>
+          )}
         </div>
       )}
 
@@ -943,6 +1054,13 @@ const ChatBox = () => {
         {error && (
           <div className="mb-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300 rounded-lg text-sm">
             {error}
+          </div>
+        )}
+
+        {/* Upload progress */}
+        {uploadProgress && (
+          <div className="mb-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 rounded-lg text-sm">
+            {uploadProgress}
           </div>
         )}
 
@@ -965,9 +1083,10 @@ const ChatBox = () => {
 
           {/* Image upload */}
           <button 
-            className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
+            className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50"
             onClick={() => fileInputRef.current?.click()}
-            disabled={isSending || selectedFiles.length >= 3}
+            disabled={isSending || selectedFiles.length >= 5}
+            title={selectedFiles.length >= 5 ? "Maximum 5 images allowed" : "Add images"}
           >
             <FontAwesomeIcon icon={faImage} />
           </button>
@@ -1013,7 +1132,7 @@ const ChatBox = () => {
             }`}
             aria-label="Send message"
           >
-            {isSending || isUploading ? (
+            {isSending ? (
               <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
             ) : (
               <FontAwesomeIcon icon={faPaperPlane} />
@@ -1021,10 +1140,12 @@ const ChatBox = () => {
           </button>
         </div>
 
-        {/* Upload progress indicator */}
-        {isUploading && (
-          <div className="mt-2 text-xs text-blue-500">
-            Uploading images...
+        {/* ImgBB API Key notice */}
+        {(!IMGBB_API_KEY || IMGBB_API_KEY === 'YOUR_IMGBB_API_KEY_HERE') && selectedFiles.length > 0 && (
+          <div className="mt-2 text-xs text-yellow-600 dark:text-yellow-400 bg-yellow-100 dark:bg-yellow-900/20 p-2 rounded border border-yellow-300 dark:border-yellow-600">
+            ⚠️ ImgBB API key not configured. Images cannot be uploaded.
+            <br />
+            Get your free API key from <a href="https://api.imgbb.com/" target="_blank" rel="noopener noreferrer" className="underline">api.imgbb.com</a>
           </div>
         )}
       </div>

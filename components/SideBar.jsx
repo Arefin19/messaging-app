@@ -320,7 +320,7 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
                 {displayUserData.displayName || user.email.split('@')[0]}
               </h1>
               <p className="text-xs text-gray-300">
-                {currentUserData?.profilePictureSource === 'imgbb' ? 'Custom Avatar' : 'Online'}
+                {currentUserData?.profilePictureSource === 'imgbb' ? 'Online' : 'Online'}
               </p>
             </div>
           </div>
