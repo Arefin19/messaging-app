@@ -771,10 +771,32 @@ const ChatBox = () => {
             if (isImageFile(file.name)) {
               // Upload images to ImgBB (existing logic)
               if (!IMGBB_API_KEY || IMGBB_API_KEY === 'YOUR_IMGBB_API_KEY_HERE') {
-                throw new Error('ImgBB API key is not configured for image uploads.');
+                console.warn('ImgBB API key not configured, uploading image to Firebase Storage instead');
+                // Upload to Firebase Storage instead
+                const uploadResult = await uploadFileToStorage(
+                  file,
+                  id, // chatId
+                  user.email,
+                  (progress) => {
+                    setUploadProgress(`Uploading ${file.name}: ${Math.round(progress.progress)}%`);
+                  }
+                );
+                
+                // Create metadata document
+                try {
+                  const metadataId = await createFileMetadata(uploadResult, id);
+                  if (metadataId) {
+                    uploadResult.metadataId = metadataId;
+                  }
+                } catch (metadataError) {
+                  console.warn('Failed to create metadata for image, continuing:', metadataError);
+                }
+                
+                imageUrls.push(uploadResult.url);
+              } else {
+                const imageUrl = await uploadToImgBB(file, IMGBB_API_KEY);
+                imageUrls.push(imageUrl);
               }
-              const imageUrl = await uploadToImgBB(file, IMGBB_API_KEY);
-              imageUrls.push(imageUrl);
             } else {
               // Upload other files to Firebase Storage
               const uploadResult = await uploadFileToStorage(
@@ -787,12 +809,16 @@ const ChatBox = () => {
               );
               
               // Create metadata document
-              const metadataId = await createFileMetadata(uploadResult, id);
+              try {
+                const metadataId = await createFileMetadata(uploadResult, id);
+                if (metadataId) {
+                  uploadResult.metadataId = metadataId;
+                }
+              } catch (metadataError) {
+                console.warn('Failed to create metadata, continuing:', metadataError);
+              }
               
-              fileUrls.push({
-                ...uploadResult,
-                metadataId
-              });
+              fileUrls.push(uploadResult);
             }
             
             console.log(`✅ File ${i + 1} uploaded successfully`);
@@ -807,9 +833,9 @@ const ChatBox = () => {
         console.log('✅ All files uploaded:', { imageUrls, fileUrls });
       }
 
-      // Create message data
+      // Create message data - FIX: Make sure required fields are always present
       const messageData = {
-        message: trimmedText,
+        message: trimmedText || '', // Always include message field, even if empty
         sender: user.email,
         timestamp: serverTimestamp(),
         read: false,
@@ -839,6 +865,8 @@ const ChatBox = () => {
 
       // Save message to Firestore
       setUploadProgress('Saving message...');
+      console.log('Saving message with data:', messageData);
+      
       await addDoc(messagesRef, messageData);
 
       // Update chat's last message
@@ -848,7 +876,7 @@ const ChatBox = () => {
 
       await updateDoc(doc(db, `chats/${id}`), {
         lastUpdated: serverTimestamp(),
-        lastMessage: lastMessageText
+        lastMessage: lastMessageText || 'Files sent'
       });
 
       // Reset form

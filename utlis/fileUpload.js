@@ -1,7 +1,7 @@
 // utils/fileUpload.js - Enhanced file upload utility for Firebase Storage and ImgBB
 import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { storage } from '../firebaseconfig';
-import { addDoc, collection, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { addDoc, collection, doc, updateDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
 import { db } from '../firebaseconfig';
 
 /**
@@ -219,6 +219,14 @@ export const uploadFileToStorage = async (file, chatId, userEmail, onProgress = 
  */
 export const createFileMetadata = async (fileData, chatId) => {
   try {
+    console.log('Creating file metadata:', {
+      fileName: fileData.name,
+      fileSize: fileData.size,
+      fileType: fileData.type,
+      uploadedBy: fileData.uploadedBy,
+      chatId: chatId
+    });
+
     const metadataRef = collection(db, 'file-metadata');
     
     const metadataDoc = {
@@ -240,7 +248,9 @@ export const createFileMetadata = async (fileData, chatId) => {
     return docRef.id;
   } catch (error) {
     console.error('Failed to create file metadata:', error);
-    throw new Error(`Failed to save file metadata: ${error.message}`);
+    // Don't throw here - file upload can succeed without metadata
+    console.warn('Continuing without metadata creation');
+    return null;
   }
 };
 
@@ -253,8 +263,10 @@ export const createFileMetadata = async (fileData, chatId) => {
 export const deleteFile = async (storagePath, metadataId) => {
   try {
     // Delete from storage
-    const storageRef = ref(storage, storagePath);
-    await deleteObject(storageRef);
+    if (storagePath) {
+      const storageRef = ref(storage, storagePath);
+      await deleteObject(storageRef);
+    }
     
     // Delete metadata (if provided)
     if (metadataId) {
@@ -388,9 +400,15 @@ export const batchUploadFiles = async (files, chatId, userEmail, onProgress = nu
         }
       );
       
-      // Create metadata
-      const metadataId = await createFileMetadata(result, chatId);
-      result.metadataId = metadataId;
+      // Create metadata (optional - don't fail if this fails)
+      try {
+        const metadataId = await createFileMetadata(result, chatId);
+        if (metadataId) {
+          result.metadataId = metadataId;
+        }
+      } catch (metadataError) {
+        console.warn('Metadata creation failed, but file upload succeeded:', metadataError);
+      }
       
       results.push(result);
       
