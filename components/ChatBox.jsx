@@ -14,7 +14,19 @@ import {
   faTimes,
   faPlay,
   faDownload,
-  faHeart
+  faHeart,
+  faFile,
+  faVideo,
+  faMusic,
+  faFileArchive,
+  faCode,
+  faFilePdf,
+  faFileWord,
+  faFileExcel,
+  faFilePowerpoint,
+  faEye,
+  faCloudUpload,
+  faPlus
 } from '@fortawesome/free-solid-svg-icons';
 import { useRouter } from 'next/router';
 import { useCollectionData, useDocumentData } from 'react-firebase-hooks/firestore';
@@ -29,8 +41,232 @@ import {
   createImagePreview, 
   generateFallbackAvatar 
 } from '../utlis/imgbbUpload';
+import { 
+  validateFile, 
+  uploadFileToStorage, 
+  createFileMetadata, 
+  formatFileSize, 
+  getFileCategory,
+  getFileIcon,
+  isImageFile,
+  generateThumbnail,
+  FILE_CATEGORIES 
+} from '../utlis/fileUpload';
 
-// Simple emoji picker component
+// File type selector component (excluding images since we have a separate image button)
+const FileTypeSelector = ({ onFileTypeSelect, onClose, isVisible }) => {
+  const fileTypes = [
+    { key: 'documents', label: 'Documents', icon: faFilePdf, extensions: FILE_CATEGORIES.DOCUMENTS.extensions },
+    { key: 'videos', label: 'Videos', icon: faVideo, extensions: FILE_CATEGORIES.VIDEOS.extensions },
+    { key: 'audio', label: 'Audio', icon: faMusic, extensions: FILE_CATEGORIES.AUDIO.extensions },
+    { key: 'archives', label: 'Archives', icon: faFileArchive, extensions: FILE_CATEGORIES.ARCHIVES.extensions },
+    { key: 'code', label: 'Code', icon: faCode, extensions: FILE_CATEGORIES.CODE.extensions },
+    { key: 'other', label: 'Other Files', icon: faFile, extensions: [] }
+  ];
+
+  if (!isVisible) return null;
+
+  const getAcceptString = (extensions) => {
+    if (extensions.length === 0) {
+      // For "other files", exclude common image, video, audio, document extensions
+      return '*/*';
+    }
+    return extensions.map(ext => `.${ext}`).join(',');
+  };
+
+  return (
+    <div className="absolute bottom-14 left-0 bg-white dark:bg-gray-700 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 p-3 w-64 z-50">
+      <div className="flex justify-between items-center mb-3">
+        <h3 className="text-sm font-medium text-gray-800 dark:text-white">Choose file type</h3>
+        <button 
+          onClick={onClose}
+          className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+        >
+          <FontAwesomeIcon icon={faTimes} />
+        </button>
+      </div>
+      <div className="space-y-1">
+        {fileTypes.map((type) => (
+          <button
+            key={type.key}
+            onClick={() => {
+              const input = document.createElement('input');
+              input.type = 'file';
+              input.multiple = true;
+              input.accept = getAcceptString(type.extensions);
+              input.onchange = (e) => onFileTypeSelect(e.target.files);
+              input.click();
+              onClose();
+            }}
+            className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-600 rounded-lg transition-colors text-gray-800 dark:text-gray-200"
+          >
+            <FontAwesomeIcon icon={type.icon} className="text-blue-500 w-4" />
+            <div>
+              <div className="font-medium">{type.label}</div>
+              <div className="text-xs text-gray-500 dark:text-gray-400">
+                {type.extensions.length > 0 
+                  ? type.extensions.slice(0, 3).join(', ') + (type.extensions.length > 3 ? '...' : '')
+                  : 'Other file types'
+                }
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+      <div className="mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
+        <p className="text-xs text-gray-500 dark:text-gray-400">
+          💡 Use the image button for photos
+        </p>
+      </div>
+    </div>
+  );
+};
+
+// Enhanced File Preview Component
+const FilePreview = ({ 
+  file, 
+  fileInfo, 
+  onRemove, 
+  uploadProgress = null, 
+  isUploading = false,
+  error = null 
+}) => {
+  const [preview, setPreview] = useState(null);
+
+  useEffect(() => {
+    if (file && isImageFile(file.name)) {
+      const reader = new FileReader();
+      reader.onloadend = () => setPreview(reader.result);
+      reader.readAsDataURL(file);
+    }
+  }, [file]);
+
+  if (!file) return null;
+
+  const fileCategory = getFileCategory(file.name);
+  const fileIcon = getFileIcon(file.name);
+
+  return (
+    <div className="relative inline-block mr-2 mb-2 group">
+      <div className={`w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 flex flex-col items-center justify-center p-2 ${
+        isUploading ? 'opacity-60' : ''
+      } ${error ? 'border-red-300 bg-red-50 dark:bg-red-900/20' : ''}`}>
+        
+        {/* Image preview */}
+        {preview ? (
+          <img 
+            src={preview} 
+            alt="Preview" 
+            className="w-full h-full object-cover rounded"
+          />
+        ) : (
+          <>
+            {/* File icon */}
+            <div className="text-blue-500 text-xl mb-1">
+              {fileIcon}
+            </div>
+            
+            {/* File extension */}
+            <div className="text-xs font-medium text-gray-600 dark:text-gray-300 uppercase">
+              {file.name.split('.').pop()}
+            </div>
+          </>
+        )}
+        
+        {/* Upload progress overlay */}
+        {isUploading && (
+          <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center">
+            <div className="text-center">
+              <FontAwesomeIcon icon={faSpinner} className="text-white animate-spin mb-1" />
+              <div className="text-xs text-white">
+                {uploadProgress || 'Uploading...'}
+              </div>
+            </div>
+          </div>
+        )}
+        
+        {/* Error overlay */}
+        {error && (
+          <div className="absolute inset-0 bg-red-500 bg-opacity-20 rounded-lg flex items-center justify-center">
+            <div className="text-xs text-red-600 text-center p-1">
+              Error
+            </div>
+          </div>
+        )}
+      </div>
+      
+      {/* File info */}
+      <div className="mt-1 text-center">
+        <div className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate max-w-20" title={file.name}>
+          {file.name}
+        </div>
+        <div className="text-xs text-gray-500 dark:text-gray-400">
+          {formatFileSize(file.size)}
+        </div>
+      </div>
+      
+      {/* Remove button */}
+      {!isUploading && (
+        <button
+          onClick={onRemove}
+          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600 transition-colors"
+          title="Remove file"
+        >
+          <FontAwesomeIcon icon={faTimes} />
+        </button>
+      )}
+      
+      {/* Error tooltip */}
+      {error && (
+        <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-red-600 text-white text-xs px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10">
+          {error}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// File Display Component for messages
+const FileDisplay = ({ fileInfo, onDownload, onPreview, compact = true }) => {
+  if (!fileInfo) return null;
+
+  const fileIcon = getFileIcon(fileInfo.name);
+  const canPreview = isImageFile(fileInfo.name) || fileInfo.type === 'application/pdf';
+
+  return (
+    <div className={`${compact ? 'inline-flex items-center gap-2 bg-gray-100 dark:bg-gray-700 rounded-lg px-3 py-2 text-sm max-w-xs' : 'bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-600 p-4 max-w-sm'}`}>
+      <span className="text-blue-500 text-lg">{fileIcon}</span>
+      <div className="flex-1 min-w-0">
+        <div className="font-medium text-gray-800 dark:text-gray-200 truncate" title={fileInfo.name}>
+          {fileInfo.name}
+        </div>
+        <div className="text-xs text-gray-500 dark:text-gray-400">
+          {formatFileSize(fileInfo.size)}
+        </div>
+      </div>
+      <div className="flex gap-1">
+        {canPreview && (
+          <button
+            onClick={() => onPreview?.(fileInfo)}
+            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
+            title="Preview"
+          >
+            <FontAwesomeIcon icon={faEye} className="text-xs" />
+          </button>
+        )}
+        <button
+          onClick={() => onDownload?.(fileInfo)}
+          className="p-1 rounded hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
+          title="Download"
+        >
+          <FontAwesomeIcon icon={faDownload} className="text-xs" />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Simple emoji picker component (existing)
 const EmojiPicker = ({ onEmojiSelect, onClose, isVisible }) => {
   const emojis = [
     '😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', '😇', '🙂',
@@ -82,7 +318,7 @@ const EmojiPicker = ({ onEmojiSelect, onClose, isVisible }) => {
   );
 };
 
-// Quick reaction picker component
+// Quick reaction picker component (existing)
 const QuickReactionPicker = ({ onReactionSelect, onClose, isVisible, position = { top: 0, left: 0 } }) => {
   const quickReactions = ['👍', '❤️', '😂', '😮', '😢', '😡'];
 
@@ -119,7 +355,7 @@ const QuickReactionPicker = ({ onReactionSelect, onClose, isVisible, position = 
   );
 };
 
-// Message context menu component
+// Message context menu component (existing)
 const MessageContextMenu = ({ 
   isVisible, 
   position, 
@@ -181,54 +417,7 @@ const MessageContextMenu = ({
   );
 };
 
-// Enhanced Image preview component with upload progress
-const ImagePreview = ({ file, onRemove, uploadProgress = null, isUploading = false }) => {
-  const [preview, setPreview] = useState(null);
-
-  useEffect(() => {
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => setPreview(reader.result);
-      reader.readAsDataURL(file);
-    }
-  }, [file]);
-
-  if (!preview) return null;
-
-  return (
-    <div className="relative inline-block mr-2 mb-2">
-      <img 
-        src={preview} 
-        alt="Preview" 
-        className={`w-20 h-20 object-cover rounded-lg border border-gray-300 ${isUploading ? 'opacity-60' : ''}`}
-      />
-      
-      {/* Upload progress overlay */}
-      {isUploading && (
-        <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center">
-          <div className="text-center">
-            <FontAwesomeIcon icon={faSpinner} className="text-white animate-spin mb-1" />
-            <div className="text-xs text-white">
-              {uploadProgress || 'Uploading...'}
-            </div>
-          </div>
-        </div>
-      )}
-      
-      {/* Remove button */}
-      {!isUploading && (
-        <button
-          onClick={onRemove}
-          className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs hover:bg-red-600"
-        >
-          <FontAwesomeIcon icon={faTimes} />
-        </button>
-      )}
-    </div>
-  );
-};
-
-// Reaction display component
+// Reaction display component (existing)
 const MessageReactions = ({ reactions, onReactionClick, currentUserEmail }) => {
   if (!reactions || Object.keys(reactions).length === 0) return null;
 
@@ -269,6 +458,7 @@ const Message = ({
   otherUserPhoto, 
   imageUrl, 
   images,
+  files,
   replyTo,
   reactions,
   onReply,
@@ -310,6 +500,20 @@ const Message = ({
   const handleReactionClick = (emoji) => {
     console.log('Clicking reaction:', emoji, 'for message:', effectiveMessageId);
     onReact(effectiveMessageId, emoji);
+  };
+
+  const handleFileDownload = (file) => {
+    const link = document.createElement('a');
+    link.href = file.url;
+    link.download = file.name;
+    link.target = '_blank';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleFilePreview = (file) => {
+    window.open(file.url, '_blank');
   };
 
   // Get all images (support both single imageUrl and multiple images array)
@@ -412,6 +616,21 @@ const Message = ({
                 </div>
               )}
 
+              {/* Files content */}
+              {files && files.length > 0 && (
+                <div className="mb-2 space-y-1">
+                  {files.map((file, index) => (
+                    <FileDisplay
+                      key={index}
+                      fileInfo={file}
+                      onDownload={handleFileDownload}
+                      onPreview={handleFilePreview}
+                      compact={true}
+                    />
+                  ))}
+                </div>
+              )}
+
               {/* Text content */}
               {text && <p className="whitespace-pre-wrap break-words">{text}</p>}
 
@@ -510,10 +729,12 @@ const ChatBox = () => {
   const [showOptions, setShowOptions] = useState(false);
   const [replyingTo, setReplyingTo] = useState(null);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [showFileTypeSelector, setShowFileTypeSelector] = useState(false);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState('');
   const [contextMenu, setContextMenu] = useState({ isVisible: false, messageId: null, position: { top: 0, left: 0 } });
+  const [uploadingFiles, setUploadingFiles] = useState(new Map());
 
   // ImgBB API key - You need to get this from https://api.imgbb.com/
   const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || 'YOUR_IMGBB_API_KEY_HERE';
@@ -528,40 +749,62 @@ const ChatBox = () => {
       setUploadProgress('');
 
       let imageUrls = [];
+      let fileUrls = [];
 
-      // Upload images to ImgBB if any
+      // Upload files
       if (selectedFiles.length > 0) {
-        if (!IMGBB_API_KEY || IMGBB_API_KEY === 'YOUR_IMGBB_API_KEY_HERE') {
-          throw new Error('ImgBB API key is not configured. Please add NEXT_PUBLIC_IMGBB_API_KEY to your environment variables.');
-        }
-
         setIsUploading(true);
-        setUploadProgress('Starting image upload...');
+        setUploadProgress('Starting file upload...');
         
         for (let i = 0; i < selectedFiles.length; i++) {
           const file = selectedFiles[i];
           try {
-            setUploadProgress(`Uploading image ${i + 1} of ${selectedFiles.length}...`);
-            console.log(`Uploading image ${i + 1}:`, file.name);
+            setUploadProgress(`Uploading file ${i + 1} of ${selectedFiles.length}...`);
+            console.log(`Uploading file ${i + 1}:`, file.name);
             
             // Validate file before upload
-            const validation = validateImageFile(file);
+            const validation = validateFile(file);
             if (!validation.isValid) {
               throw new Error(`Invalid file ${file.name}: ${validation.error}`);
             }
             
-            const imageUrl = await uploadToImgBB(file, IMGBB_API_KEY);
-            imageUrls.push(imageUrl);
-            console.log(`✅ Image ${i + 1} uploaded successfully:`, imageUrl);
+            if (isImageFile(file.name)) {
+              // Upload images to ImgBB (existing logic)
+              if (!IMGBB_API_KEY || IMGBB_API_KEY === 'YOUR_IMGBB_API_KEY_HERE') {
+                throw new Error('ImgBB API key is not configured for image uploads.');
+              }
+              const imageUrl = await uploadToImgBB(file, IMGBB_API_KEY);
+              imageUrls.push(imageUrl);
+            } else {
+              // Upload other files to Firebase Storage
+              const uploadResult = await uploadFileToStorage(
+                file,
+                id, // chatId
+                user.email,
+                (progress) => {
+                  setUploadProgress(`Uploading ${file.name}: ${Math.round(progress.progress)}%`);
+                }
+              );
+              
+              // Create metadata document
+              const metadataId = await createFileMetadata(uploadResult, id);
+              
+              fileUrls.push({
+                ...uploadResult,
+                metadataId
+              });
+            }
+            
+            console.log(`✅ File ${i + 1} uploaded successfully`);
             
           } catch (uploadError) {
-            console.error(`Failed to upload image ${i + 1}:`, uploadError);
+            console.error(`Failed to upload file ${i + 1}:`, uploadError);
             throw new Error(`Failed to upload ${file.name}: ${uploadError.message}`);
           }
         }
         setIsUploading(false);
-        setUploadProgress('Images uploaded successfully!');
-        console.log('✅ All images uploaded to ImgBB:', imageUrls);
+        setUploadProgress('Files uploaded successfully!');
+        console.log('✅ All files uploaded:', { imageUrls, fileUrls });
       }
 
       // Create message data
@@ -573,11 +816,16 @@ const ChatBox = () => {
         reactions: {}
       };
 
-      // Add image data if available
+      // Add image data if available (backward compatibility)
       if (imageUrls.length > 0) {
         messageData.images = imageUrls;
         messageData.imageUrl = imageUrls[0]; // Keep for backward compatibility
         messageData.imageUploadSource = 'imgbb';
+      }
+
+      // Add file data if available
+      if (fileUrls.length > 0) {
+        messageData.files = fileUrls;
       }
 
       // Add reply data if replying
@@ -594,9 +842,13 @@ const ChatBox = () => {
       await addDoc(messagesRef, messageData);
 
       // Update chat's last message
+      const lastMessageText = trimmedText || 
+        (imageUrls.length > 0 ? `📷 ${imageUrls.length > 1 ? `${imageUrls.length} Images` : 'Image'}` : '') +
+        (fileUrls.length > 0 ? `📎 ${fileUrls.length > 1 ? `${fileUrls.length} Files` : fileUrls[0]?.name || 'File'}` : '');
+
       await updateDoc(doc(db, `chats/${id}`), {
         lastUpdated: serverTimestamp(),
-        lastMessage: trimmedText || `📷 ${imageUrls.length > 1 ? `${imageUrls.length} Images` : 'Image'}`
+        lastMessage: lastMessageText
       });
 
       // Reset form
@@ -759,13 +1011,13 @@ const ChatBox = () => {
     textInputRef.current?.focus();
   };
 
-  const handleFileSelect = (e) => {
-    const files = Array.from(e.target.files);
+  const handleFileSelect = (files) => {
+    const fileArray = Array.from(files);
     const validFiles = [];
     let hasErrors = false;
 
-    files.forEach(file => {
-      const validation = validateImageFile(file);
+    fileArray.forEach(file => {
+      const validation = validateFile(file);
       if (validation.isValid) {
         validFiles.push(file);
       } else {
@@ -776,11 +1028,11 @@ const ChatBox = () => {
     });
 
     if (validFiles.length > 0) {
-      // Limit to maximum 5 images
+      // Limit to maximum 10 files
       const totalFiles = selectedFiles.length + validFiles.length;
-      if (totalFiles > 5) {
-        setError('Maximum 5 images allowed per message');
-        const allowedCount = 5 - selectedFiles.length;
+      if (totalFiles > 10) {
+        setError('Maximum 10 files allowed per message');
+        const allowedCount = 10 - selectedFiles.length;
         setSelectedFiles(prev => [...prev, ...validFiles.slice(0, allowedCount)]);
       } else {
         setSelectedFiles(prev => [...prev, ...validFiles]);
@@ -789,9 +1041,6 @@ const ChatBox = () => {
         }
       }
     }
-
-    // Reset file input
-    e.target.value = '';
   };
 
   const removeFile = (index) => {
@@ -816,17 +1065,20 @@ const ChatBox = () => {
     }
   }, [messages]);
 
-  // Close emoji picker when clicking outside
+  // Close pickers when clicking outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (showEmojiPicker && !event.target.closest('.emoji-picker-container')) {
         setShowEmojiPicker(false);
       }
+      if (showFileTypeSelector && !event.target.closest('.file-selector-container')) {
+        setShowFileTypeSelector(false);
+      }
     };
 
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
-  }, [showEmojiPicker]);
+  }, [showEmojiPicker, showFileTypeSelector]);
 
   if (loadingChat) {
     return (
@@ -958,6 +1210,7 @@ const ChatBox = () => {
                 otherUserPhoto={null}
                 imageUrl={msg.imageUrl}
                 images={msg.images}
+                files={msg.files}
                 replyTo={msg.replyTo}
                 reactions={msg.reactions}
                 onReply={handleReply}
@@ -1032,7 +1285,7 @@ const ChatBox = () => {
         <div className="p-3 bg-gray-100 dark:bg-gray-700 border-t border-gray-300 dark:border-gray-600">
           <div className="flex flex-wrap">
             {selectedFiles.map((file, index) => (
-              <ImagePreview 
+              <FilePreview 
                 key={index} 
                 file={file} 
                 onRemove={() => removeFile(index)}
@@ -1043,7 +1296,7 @@ const ChatBox = () => {
           </div>
           {selectedFiles.length > 0 && (
             <div className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-              {selectedFiles.length}/5 images selected
+              {selectedFiles.length}/10 files selected
             </div>
           )}
         </div>
@@ -1081,23 +1334,41 @@ const ChatBox = () => {
             />
           </div>
 
-          {/* Image upload */}
-          <button 
-            className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isSending || selectedFiles.length >= 5}
-            title={selectedFiles.length >= 5 ? "Maximum 5 images allowed" : "Add images"}
-          >
-            <FontAwesomeIcon icon={faImage} />
-          </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            onChange={handleFileSelect}
-            className="hidden"
-          />
+          {/* Image upload container */}
+          <div className="image-upload-container relative">
+            <button 
+              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50"
+              onClick={() => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.multiple = true;
+                input.accept = 'image/*';
+                input.onchange = (e) => handleFileSelect(e.target.files);
+                input.click();
+              }}
+              disabled={isSending || selectedFiles.length >= 10}
+              title={selectedFiles.length >= 10 ? "Maximum 10 files allowed" : "Add images"}
+            >
+              <FontAwesomeIcon icon={faImage} />
+            </button>
+          </div>
+
+          {/* File upload container */}
+          <div className="file-selector-container relative">
+            <button 
+              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50"
+              onClick={() => setShowFileTypeSelector(!showFileTypeSelector)}
+              disabled={isSending || selectedFiles.length >= 10}
+              title={selectedFiles.length >= 10 ? "Maximum 10 files allowed" : "Add files"}
+            >
+              <FontAwesomeIcon icon={faCloudUpload} />
+            </button>
+            <FileTypeSelector
+              isVisible={showFileTypeSelector}
+              onFileTypeSelect={handleFileSelect}
+              onClose={() => setShowFileTypeSelector(false)}
+            />
+          </div>
 
           <div className="flex-1 relative">
             <input
@@ -1140,10 +1411,10 @@ const ChatBox = () => {
           </button>
         </div>
 
-        {/* ImgBB API Key notice */}
-        {(!IMGBB_API_KEY || IMGBB_API_KEY === 'YOUR_IMGBB_API_KEY_HERE') && selectedFiles.length > 0 && (
+        {/* Configuration notices */}
+        {(!IMGBB_API_KEY || IMGBB_API_KEY === 'YOUR_IMGBB_API_KEY_HERE') && selectedFiles.some(f => isImageFile(f.name)) && (
           <div className="mt-2 text-xs text-yellow-600 dark:text-yellow-400 bg-yellow-100 dark:bg-yellow-900/20 p-2 rounded border border-yellow-300 dark:border-yellow-600">
-            ⚠️ ImgBB API key not configured. Images cannot be uploaded.
+            ⚠️ ImgBB API key not configured. Images will upload to Firebase Storage instead.
             <br />
             Get your free API key from <a href="https://api.imgbb.com/" target="_blank" rel="noopener noreferrer" className="underline">api.imgbb.com</a>
           </div>
