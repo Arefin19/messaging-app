@@ -1,4 +1,4 @@
-// components/SideBar.jsx - Updated with ImgBB support and better user data handling
+// components/SideBar.jsx - Fixed with proper last message handling
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/router';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
@@ -22,7 +22,7 @@ import AddContact from './AddContact';
 import Logout from './Logout';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import { auth } from '../firebaseconfig';
-import { collection, query, where, onSnapshot, doc, setDoc, serverTimestamp, addDoc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, doc, setDoc, serverTimestamp, addDoc, getDoc, orderBy, limit } from 'firebase/firestore';
 import { db } from '../firebaseconfig';
 import getOtherUser from '../utlis/getOtherUser';
 import { getUserProfilePicture, handleProfilePictureError, getCombinedUserData, debugUserProfile } from '../utlis/profilePicture';
@@ -31,9 +31,9 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
   const router = useRouter();
   const [user, loadingAuth, authError] = useAuthState(auth);
   const [chats, setChats] = useState([]);
+  const [chatsWithMessages, setChatsWithMessages] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [currentUserData, setCurrentUserData] = useState(null);
-  const [chatUsersData, setChatUsersData] = useState({}); // New state for chat users
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -139,24 +139,16 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
       usersRef,
       (querySnapshot) => {
         const usersData = [];
-        const usersMap = {};
         querySnapshot.forEach((doc) => {
           const userData = doc.data();
-          const userInfo = { 
-            id: doc.id, 
-            ...userData
-          };
-          
           if (userData.email !== user.email.toLowerCase()) {
-            usersData.push(userInfo);
+            usersData.push({ 
+              id: doc.id, 
+              ...userData
+            });
           }
-          
-          // Store all users (including current user) in the map for chat lookups
-          usersMap[userData.email?.toLowerCase()] = userInfo;
         });
-        
         setAllUsers(usersData);
-        setChatUsersData(usersMap); // Store for quick lookup
         setUsersLoading(false);
         console.log(`✅ Loaded ${usersData.length} users from Firestore`);
       },
@@ -208,6 +200,83 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
 
     return () => unsubscribe();
   }, [user]);
+
+  // Fetch last messages for each chat
+  useEffect(() => {
+    if (!chats.length) {
+      setChatsWithMessages([]);
+      return;
+    }
+
+    const unsubscribers = [];
+    const chatsWithLastMessages = new Map();
+
+    chats.forEach((chat) => {
+      // Query for the latest message in this chat
+      const messagesQuery = query(
+        collection(db, 'chats', chat.id, 'messages'),
+        orderBy('timestamp', 'desc'),
+        limit(1)
+      );
+
+      const unsubscribe = onSnapshot(
+        messagesQuery,
+        (snapshot) => {
+          let lastMessage = null;
+          
+          if (!snapshot.empty) {
+            const messageDoc = snapshot.docs[0];
+            const messageData = messageDoc.data();
+            lastMessage = {
+              id: messageDoc.id,
+              text: messageData.text || '',
+              sender: messageData.sender || '',
+              timestamp: messageData.timestamp,
+              read: messageData.read || false
+            };
+          }
+
+          // Update the chat with last message info
+          chatsWithLastMessages.set(chat.id, {
+            ...chat,
+            lastMessage: lastMessage
+          });
+
+          // Convert map to array and sort by last message timestamp
+          const sortedChats = Array.from(chatsWithLastMessages.values()).sort((a, b) => {
+            const aTime = a.lastMessage?.timestamp?.toDate?.() || new Date(0);
+            const bTime = b.lastMessage?.timestamp?.toDate?.() || new Date(0);
+            return bTime - aTime;
+          });
+
+          setChatsWithMessages(sortedChats);
+        },
+        (error) => {
+          console.error(`Error fetching messages for chat ${chat.id}:`, error);
+          // Still add the chat without message data
+          chatsWithLastMessages.set(chat.id, {
+            ...chat,
+            lastMessage: null
+          });
+
+          const sortedChats = Array.from(chatsWithLastMessages.values()).sort((a, b) => {
+            const aTime = a.lastMessage?.timestamp?.toDate?.() || new Date(0);
+            const bTime = b.lastMessage?.timestamp?.toDate?.() || new Date(0);
+            return bTime - aTime;
+          });
+
+          setChatsWithMessages(sortedChats);
+        }
+      );
+
+      unsubscribers.push(unsubscribe);
+    });
+
+    // Cleanup function
+    return () => {
+      unsubscribers.forEach(unsubscribe => unsubscribe());
+    };
+  }, [chats]);
 
   // Create or get existing chat with a user
   const startChatWithUser = async (selectedUser) => {
@@ -262,20 +331,9 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
     setSearchQuery('');
   };
 
-  // Get other user data for a chat
-  const getOtherUserData = (chat) => {
+  const filteredChats = chatsWithMessages.filter(chat => {
     const otherUserEmail = getOtherUser(chat.users, user?.email?.toLowerCase() || '');
-    return chatUsersData[otherUserEmail] || { email: otherUserEmail };
-  };
-
-  const filteredChats = chats.filter(chat => {
-    const otherUserEmail = getOtherUser(chat.users, user?.email?.toLowerCase() || '');
-    const otherUserData = chatUsersData[otherUserEmail];
-    const searchTerm = searchQuery.toLowerCase();
-    
-    return otherUserEmail.toLowerCase().includes(searchTerm) ||
-           otherUserData?.displayName?.toLowerCase().includes(searchTerm) ||
-           otherUserData?.email?.toLowerCase().includes(searchTerm);
+    return otherUserEmail.toLowerCase().includes(searchQuery.toLowerCase());
   });
 
   const filteredUsers = allUsers.filter(userData => {
@@ -492,16 +550,23 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
               </div>
             ) : (
               filteredChats.map((chat) => {
-                const otherUserData = getOtherUserData(chat);
+                const otherUserEmail = getOtherUser(chat.users, user.email?.toLowerCase() || '');
                 const isActive = activeChatId === chat.id;
+                // Find userData for the other user
+                const otherUserData = allUsers.find(userData => 
+                  userData.email?.toLowerCase() === otherUserEmail.toLowerCase()
+                );
+                
                 return (
                   <ContactCard 
                     key={chat.id}
                     data={chat}
-                    email={otherUserData.email}
-                    otherUserData={otherUserData} // Pass the full user data
+                    email={otherUserEmail}
                     onClick={() => handleChatSelection(chat)}
                     isActive={isActive}
+                    lastMessage={chat.lastMessage}
+                    userData={otherUserData}
+                    currentUserEmail={user.email?.toLowerCase()}
                   />
                 );
               })

@@ -1,97 +1,121 @@
-// components/ContactCard.jsx - Updated to display profile pictures properly
 import React from 'react';
+import { useRouter } from 'next/router';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { 
+  faCheckDouble,
+  faMessage
+} from '@fortawesome/free-solid-svg-icons';
+import { formatDistanceToNow } from 'date-fns';
 import { getUserProfilePicture, handleProfilePictureError } from '../utlis/profilePicture';
 
-const ContactCard = ({ data, email, otherUserData, onClick, isActive }) => {
-  // Use otherUserData if available, otherwise create basic user object
-  const userData = otherUserData || { 
-    email: email, 
-    displayName: email?.split('@')[0] || 'Unknown User' 
-  };
-  
-  // Get profile picture using the userData
-  const profilePic = getUserProfilePicture(userData, 40);
-  
-  // Format last message or show default
-  const lastMessage = data?.lastMessage || 'No messages yet';
-  const displayName = userData.displayName || email?.split('@')[0] || 'Unknown User';
-  
-  // Format last seen/timestamp if available
-  const formatTimestamp = (timestamp) => {
-    if (!timestamp) return '';
-    
-    try {
-      const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-      const now = new Date();
-      const diffTime = Math.abs(now - date);
-      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-      
-      if (diffDays === 1) {
-        return 'Yesterday';
-      } else if (diffDays < 7) {
-        return `${diffDays} days ago`;
-      } else {
-        return date.toLocaleDateString();
-      }
-    } catch (error) {
-      console.error('Error formatting timestamp:', error);
-      return '';
+const ContactCard = ({ data, email, isActive, lastMessage, onClick, userData, currentUserEmail }) => {
+  const router = useRouter();
+
+  const redirect = () => {
+    if (onClick) {
+      onClick();
+    } else {
+      router.push(`/chat/${data.id}`);
     }
   };
 
+  const formatTime = (timestamp) => {
+    if (!timestamp) return '';
+    
+    // Handle Firestore timestamp
+    if (timestamp?.toDate) {
+      return formatDistanceToNow(timestamp.toDate(), { addSuffix: true });
+    }
+    
+    // Handle regular Date object or timestamp
+    const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
+    if (isNaN(date.getTime())) return '';
+    
+    return formatDistanceToNow(date, { addSuffix: true });
+  };
+
+  const truncateMessage = (message, length = 25) => {
+    if (!message) return '';
+    return message.length > length 
+      ? `${message.substring(0, length)}...` 
+      : message;
+  };
+
+  // Function to get user profile picture with proper fallback using utility functions
+  const userProfilePic = userData ? 
+    getUserProfilePicture(userData, 40) : 
+    `https://ui-avatars.com/api/?name=${email.charAt(0).toUpperCase()}&background=4F46E5&color=fff&size=40`;
+
+  // Check if user is online (you might want to pass this as prop or fetch from user data)
+  const isOnline = false; // You can implement online status checking here
+
+  // Check if there's an existing chat (for "Connected" badge)
+  const hasExistingChat = data && data.id;
+
   return (
-    <div 
-      onClick={onClick}
-      className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer transition-all mb-2 ${
-        isActive 
-          ? 'bg-dPri text-white' 
-          : 'hover:bg-gray-600/50 text-white'
+    <div
+      onClick={redirect}
+      className={`flex items-center gap-3 p-3 hover:bg-gray-600/50 rounded-lg cursor-pointer transition-all mb-2 ${
+        isActive ? 'bg-gray-600/70 border-l-4 border-dPri' : ''
       }`}
     >
-      {/* Profile Picture */}
-      <div className="relative flex-shrink-0">
-        <img 
-          src={profilePic}
-          alt={`${displayName} profile`}
-          className="w-12 h-12 rounded-full object-cover "
-          onError={(e) => handleProfilePictureError(e, userData, 40)}
-        />
-        {/* Online indicator */}
-        {userData.isOnline && (
-          <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
-        )}
-      </div>
-      
-      {/* Chat Info */}
+      <img 
+        src={userProfilePic} 
+        alt="User profile" 
+        className="w-10 h-10 rounded-full object-cover"
+        onError={(e) => userData ? 
+          handleProfilePictureError(e, userData, 40) : 
+          (() => {
+            const initial = email.charAt(0).toUpperCase();
+            e.target.src = `https://ui-avatars.com/api/?name=${initial}&background=4F46E5&color=fff&size=40`;
+          })()
+        }
+      />
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
-          <h3 className="font-medium truncate">
-            {displayName}
+          <h3 className="font-medium truncate text-white">
+            {email.split('@')[0]} {/* Show username part only, like displayName */}
           </h3>
-          {data?.lastUpdated && (
-            <span className="text-xs opacity-70">
-              {formatTimestamp(data.lastUpdated)}
+         
+          {lastMessage?.timestamp && (
+            <span className="text-xs text-gray-400 whitespace-nowrap ml-2">
+              {formatTime(lastMessage.timestamp)}
             </span>
           )}
         </div>
-        
-        <div className="flex items-center justify-between mt-1">
-          <p className="text-sm opacity-70 truncate">
-            {lastMessage}
-          </p>
-          
-          {/* Unread count (if you implement it later) */}
-          {data?.unreadCount > 0 && (
-            <span className="bg-red-500 text-white text-xs rounded-full px-2 py-1 min-w-[20px] text-center">
-              {data.unreadCount}
-            </span>
-          )}
-        </div>
-        
-        {/* User email for reference */}
-        <p className="text-xs opacity-50 truncate mt-1">
+        <p className="text-xs text-gray-400 truncate">
           {email}
         </p>
+        
+        {/* Last Message Preview or Online Status */}
+        {lastMessage && lastMessage.text ? (
+          <div className="flex items-center gap-1.5 mt-1">
+            {lastMessage.sender?.toLowerCase() !== currentUserEmail?.toLowerCase() ? (
+              <>
+                <span className="text-gray-300 text-xs truncate">
+                  {truncateMessage(lastMessage.text)}
+                </span>
+                <FontAwesomeIcon 
+                  icon={lastMessage.read ? faCheckDouble : faMessage} 
+                  className={`text-xs ${
+                    lastMessage.read ? 'text-cyan-400' : 'text-gray-400'
+                  }`} 
+                />
+              </>
+            ) : (
+              <span className="text-gray-400 text-xs truncate">
+                You: {truncateMessage(lastMessage.text)}
+              </span>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 mt-1">
+            <div className={`w-2 h-2 rounded-full ${isOnline ? 'bg-green-400' : 'bg-gray-400'}`}></div>
+            <span className="text-xs text-gray-400">
+              {isOnline ? 'Online' : 'Offline'}
+            </span>
+          </div>
+        )}
       </div>
     </div>
   );
