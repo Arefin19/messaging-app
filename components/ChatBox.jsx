@@ -50,7 +50,10 @@ import {
   getFileIcon,
   isImageFile,
   generateThumbnail,
-  FILE_CATEGORIES 
+  FILE_CATEGORIES,
+  getFileFromStorage,
+  getDownloadUrl,
+  downloadFileFromStorage
 } from '../utlis/fileUpload';
 
 // File type selector component (excluding images since we have a separate image button)
@@ -68,7 +71,6 @@ const FileTypeSelector = ({ onFileTypeSelect, onClose, isVisible }) => {
 
   const getAcceptString = (extensions) => {
     if (extensions.length === 0) {
-      // For "other files", exclude common image, video, audio, document extensions
       return '*/*';
     }
     return extensions.map(ext => `.${ext}`).join(',');
@@ -266,7 +268,7 @@ const FileDisplay = ({ fileInfo, onDownload, onPreview, compact = true }) => {
   );
 };
 
-// Simple emoji picker component (existing)
+// Simple emoji picker component
 const EmojiPicker = ({ onEmojiSelect, onClose, isVisible }) => {
   const emojis = [
     '😀', '😃', '😄', '😁', '😅', '😂', '🤣', '😊', '😇', '🙂',
@@ -318,7 +320,7 @@ const EmojiPicker = ({ onEmojiSelect, onClose, isVisible }) => {
   );
 };
 
-// Quick reaction picker component (existing)
+// Quick reaction picker component
 const QuickReactionPicker = ({ onReactionSelect, onClose, isVisible, position = { top: 0, left: 0 } }) => {
   const quickReactions = ['👍', '❤️', '😂', '😮', '😢', '😡'];
 
@@ -355,7 +357,7 @@ const QuickReactionPicker = ({ onReactionSelect, onClose, isVisible, position = 
   );
 };
 
-// Message context menu component (existing)
+// Message context menu component
 const MessageContextMenu = ({ 
   isVisible, 
   position, 
@@ -417,7 +419,7 @@ const MessageContextMenu = ({
   );
 };
 
-// Reaction display component (existing)
+// Reaction display component
 const MessageReactions = ({ reactions, onReactionClick, currentUserEmail }) => {
   if (!reactions || Object.keys(reactions).length === 0) return null;
 
@@ -503,17 +505,32 @@ const Message = ({
   };
 
   const handleFileDownload = (file) => {
-    const link = document.createElement('a');
-    link.href = file.url;
-    link.download = file.name;
-    link.target = '_blank';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (file.id && file.id.startsWith('file_')) {
+      // localStorage file
+      downloadFileFromStorage(file.id, file.name);
+    } else {
+      // External URL (ImgBB, etc.)
+      const link = document.createElement('a');
+      link.href = file.url;
+      link.download = file.name;
+      link.target = '_blank';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
   };
 
   const handleFilePreview = (file) => {
-    window.open(file.url, '_blank');
+    if (file.id && file.id.startsWith('file_')) {
+      // localStorage file
+      const dataUrl = getDownloadUrl(file.id);
+      if (dataUrl) {
+        window.open(dataUrl, '_blank');
+      }
+    } else {
+      // External URL
+      window.open(file.url, '_blank');
+    }
   };
 
   // Get all images (support both single imageUrl and multiple images array)
@@ -751,7 +768,7 @@ const ChatBox = () => {
       let imageUrls = [];
       let fileUrls = [];
 
-      // Upload files
+      // Upload files using localStorage
       if (selectedFiles.length > 0) {
         setIsUploading(true);
         setUploadProgress('Starting file upload...');
@@ -759,8 +776,8 @@ const ChatBox = () => {
         for (let i = 0; i < selectedFiles.length; i++) {
           const file = selectedFiles[i];
           try {
-            setUploadProgress(`Uploading file ${i + 1} of ${selectedFiles.length}...`);
-            console.log(`Uploading file ${i + 1}:`, file.name);
+            setUploadProgress(`Processing file ${i + 1} of ${selectedFiles.length}...`);
+            console.log(`Processing file ${i + 1}:`, file.name);
             
             // Validate file before upload
             const validation = validateFile(file);
@@ -769,46 +786,58 @@ const ChatBox = () => {
             }
             
             if (isImageFile(file.name)) {
-              // Upload images to ImgBB (existing logic)
-              if (!IMGBB_API_KEY || IMGBB_API_KEY === 'YOUR_IMGBB_API_KEY_HERE') {
-                console.warn('ImgBB API key not configured, uploading image to Firebase Storage instead');
-                // Upload to Firebase Storage instead
+              // Handle images - try ImgBB first, fallback to localStorage
+              if (IMGBB_API_KEY && IMGBB_API_KEY !== 'YOUR_IMGBB_API_KEY_HERE') {
+                try {
+                  const imageUrl = await uploadToImgBB(file, IMGBB_API_KEY);
+                  imageUrls.push(imageUrl);
+                } catch (imgbbError) {
+                  console.warn('ImgBB upload failed, using localStorage:', imgbbError);
+                  // Fallback to localStorage
+                  const uploadResult = await uploadFileToStorage(
+                    file,
+                    id, // chatId
+                    user.email,
+                    (progress) => {
+                      setUploadProgress(`Storing ${file.name}: ${Math.round(progress.progress)}%`);
+                    }
+                  );
+                  imageUrls.push(uploadResult.url);
+                }
+              } else {
+                // Use localStorage for images
                 const uploadResult = await uploadFileToStorage(
                   file,
                   id, // chatId
                   user.email,
                   (progress) => {
-                    setUploadProgress(`Uploading ${file.name}: ${Math.round(progress.progress)}%`);
+                    setUploadProgress(`Storing ${file.name}: ${Math.round(progress.progress)}%`);
                   }
                 );
                 
-                // Create metadata document
-                try {
-                  const metadataId = await createFileMetadata(uploadResult, id);
-                  if (metadataId) {
-                    uploadResult.metadataId = metadataId;
+                // For localStorage images, we store them as files but also add to imageUrls
+                // Check if it's a base64 data URL
+                if (uploadResult.url.startsWith('localStorage://')) {
+                  const fileData = getFileFromStorage(uploadResult.id);
+                  if (fileData && fileData.data) {
+                    imageUrls.push(fileData.data); // Use the base64 data URL
                   }
-                } catch (metadataError) {
-                  console.warn('Failed to create metadata for image, continuing:', metadataError);
+                } else {
+                  imageUrls.push(uploadResult.url);
                 }
-                
-                imageUrls.push(uploadResult.url);
-              } else {
-                const imageUrl = await uploadToImgBB(file, IMGBB_API_KEY);
-                imageUrls.push(imageUrl);
               }
             } else {
-              // Upload other files to Firebase Storage
+              // Upload other files to localStorage
               const uploadResult = await uploadFileToStorage(
                 file,
                 id, // chatId
                 user.email,
                 (progress) => {
-                  setUploadProgress(`Uploading ${file.name}: ${Math.round(progress.progress)}%`);
+                  setUploadProgress(`Storing ${file.name}: ${Math.round(progress.progress)}%`);
                 }
               );
               
-              // Create metadata document
+              // Create metadata document (optional)
               try {
                 const metadataId = await createFileMetadata(uploadResult, id);
                 if (metadataId) {
@@ -821,19 +850,19 @@ const ChatBox = () => {
               fileUrls.push(uploadResult);
             }
             
-            console.log(`✅ File ${i + 1} uploaded successfully`);
+            console.log(`✅ File ${i + 1} processed successfully`);
             
           } catch (uploadError) {
-            console.error(`Failed to upload file ${i + 1}:`, uploadError);
-            throw new Error(`Failed to upload ${file.name}: ${uploadError.message}`);
+            console.error(`Failed to process file ${i + 1}:`, uploadError);
+            throw new Error(`Failed to process ${file.name}: ${uploadError.message}`);
           }
         }
         setIsUploading(false);
-        setUploadProgress('Files uploaded successfully!');
-        console.log('✅ All files uploaded:', { imageUrls, fileUrls });
+        setUploadProgress('Files processed successfully!');
+        console.log('✅ All files processed:', { imageUrls, fileUrls });
       }
 
-      // Create message data - FIX: Make sure required fields are always present
+      // Create message data
       const messageData = {
         message: trimmedText || '', // Always include message field, even if empty
         sender: user.email,
@@ -846,7 +875,7 @@ const ChatBox = () => {
       if (imageUrls.length > 0) {
         messageData.images = imageUrls;
         messageData.imageUrl = imageUrls[0]; // Keep for backward compatibility
-        messageData.imageUploadSource = 'imgbb';
+        messageData.imageUploadSource = 'localStorage';
       }
 
       // Add file data if available
@@ -1439,14 +1468,6 @@ const ChatBox = () => {
           </button>
         </div>
 
-        {/* Configuration notices */}
-        {(!IMGBB_API_KEY || IMGBB_API_KEY === 'YOUR_IMGBB_API_KEY_HERE') && selectedFiles.some(f => isImageFile(f.name)) && (
-          <div className="mt-2 text-xs text-yellow-600 dark:text-yellow-400 bg-yellow-100 dark:bg-yellow-900/20 p-2 rounded border border-yellow-300 dark:border-yellow-600">
-            ⚠️ ImgBB API key not configured. Images will upload to Firebase Storage instead.
-            <br />
-            Get your free API key from <a href="https://api.imgbb.com/" target="_blank" rel="noopener noreferrer" className="underline">api.imgbb.com</a>
-          </div>
-        )}
       </div>
     </section>
   );

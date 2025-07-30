@@ -1,7 +1,5 @@
-// utils/fileUpload.js - Enhanced file upload utility for Firebase Storage and ImgBB
-import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
-import { storage } from '../firebaseconfig';
-import { addDoc, collection, doc, updateDoc, serverTimestamp, deleteDoc } from 'firebase/firestore';
+// utils/fileUpload.js - File upload utility using localStorage
+import { addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '../firebaseconfig';
 
 /**
@@ -110,16 +108,38 @@ export const validateFile = (file) => {
 };
 
 /**
- * Upload file to Firebase Storage
- * @param {File} file - File to upload
+ * Convert file to base64 string
+ * @param {File} file - File to convert
+ * @returns {Promise<string>} - Base64 string
+ */
+const fileToBase64 = (file) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (error) => reject(error);
+    reader.readAsDataURL(file);
+  });
+};
+
+/**
+ * Generate unique file ID
+ * @returns {string} - Unique file ID
+ */
+const generateFileId = () => {
+  return `file_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+};
+
+/**
+ * Store file in localStorage
+ * @param {File} file - File to store
  * @param {string} chatId - Chat ID for organizing files
  * @param {string} userEmail - User's email
  * @param {Function} onProgress - Progress callback
- * @returns {Promise<Object>} - Upload result with download URL and metadata
+ * @returns {Promise<Object>} - File data with localStorage reference
  */
 export const uploadFileToStorage = async (file, chatId, userEmail, onProgress = null) => {
   try {
-    console.log('Starting Firebase Storage upload:', {
+    console.log('Starting localStorage file storage:', {
       fileName: file.name,
       fileSize: file.size,
       chatId,
@@ -132,87 +152,111 @@ export const uploadFileToStorage = async (file, chatId, userEmail, onProgress = 
       throw new Error(validation.error);
     }
 
-    // Create unique filename to prevent conflicts
-    const timestamp = Date.now();
-    const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const fileName = `${timestamp}_${safeName}`;
+    // Report progress start
+    if (onProgress) {
+      onProgress({ progress: 0 });
+    }
+
+    // Convert file to base64
+    const base64Data = await fileToBase64(file);
     
-    // Create storage reference
-    const storageRef = ref(storage, `chat-files/${chatId}/${fileName}`);
+    // Report progress
+    if (onProgress) {
+      onProgress({ progress: 50 });
+    }
+
+    // Generate unique file ID
+    const fileId = generateFileId();
     
-    // Set metadata
-    const metadata = {
-      contentType: file.type,
-      customMetadata: {
-        uploadedBy: userEmail,
-        originalName: file.name,
-        chatId: chatId,
-        uploadTimestamp: timestamp.toString()
-      }
+    // Create file data object
+    const fileData = {
+      id: fileId,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      data: base64Data,
+      uploadedBy: userEmail,
+      uploadedAt: new Date().toISOString(),
+      chatId: chatId,
+      category: validation.category
     };
 
-    // Start upload with resumable upload
-    const uploadTask = uploadBytesResumable(storageRef, file, metadata);
+    // Store in localStorage
+    try {
+      const storageKey = `chatFile_${fileId}`;
+      const dataString = JSON.stringify(fileData);
+      localStorage.setItem(storageKey, dataString);
+      
+      // Also maintain an index of files for this chat
+      const chatFilesKey = `chatFiles_${chatId}`;
+      const existingFiles = JSON.parse(localStorage.getItem(chatFilesKey) || '[]');
+      existingFiles.push({
+        fileId: fileId,
+        fileName: file.name,
+        uploadedAt: fileData.uploadedAt,
+        uploadedBy: userEmail
+      });
+      localStorage.setItem(chatFilesKey, JSON.stringify(existingFiles));
+      
+    } catch (storageError) {
+      throw new Error('Failed to store file in localStorage. File might be too large.');
+    }
+
+    // Report completion
+    if (onProgress) {
+      onProgress({ progress: 100 });
+    }
+
+    const result = {
+      id: fileId,
+      url: `localStorage://${fileId}`, // Custom URL format for localStorage
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      uploadedBy: userEmail,
+      uploadedAt: new Date(),
+      category: validation.category,
+      storageType: 'localStorage'
+    };
     
-    return new Promise((resolve, reject) => {
-      uploadTask.on('state_changed',
-        // Progress function
-        (snapshot) => {
-          const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-          console.log(`Upload progress: ${progress.toFixed(1)}%`);
-          
-          if (onProgress) {
-            onProgress({
-              progress: progress,
-              bytesTransferred: snapshot.bytesTransferred,
-              totalBytes: snapshot.totalBytes,
-              state: snapshot.state
-            });
-          }
-        },
-        // Error function
-        (error) => {
-          console.error('Firebase Storage upload failed:', error);
-          reject(new Error(`Upload failed: ${error.message}`));
-        },
-        // Complete function
-        async () => {
-          try {
-            const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-            
-            const result = {
-              url: downloadURL,
-              name: file.name,
-              size: file.size,
-              type: file.type,
-              uploadedBy: userEmail,
-              uploadedAt: new Date(),
-              category: validation.category,
-              storageRef: uploadTask.snapshot.ref.fullPath
-            };
-            
-            console.log('✅ File uploaded successfully to Firebase Storage:', {
-              name: result.name,
-              url: result.url,
-              size: result.size
-            });
-            
-            resolve(result);
-          } catch (error) {
-            reject(new Error(`Failed to get download URL: ${error.message}`));
-          }
-        }
-      );
+    console.log('✅ File stored successfully in localStorage:', {
+      name: result.name,
+      id: result.id,
+      size: result.size
     });
+    
+    return result;
 
   } catch (error) {
-    console.error('Firebase Storage upload error:', error);
-    throw new Error(`Failed to upload file: ${error.message}`);
+    console.error('localStorage file storage error:', error);
+    throw new Error(`Failed to store file: ${error.message}`);
   }
 };
 
 /**
- * Create file metadata document in Firestore
+ * Retrieve file from localStorage
+ * @param {string} fileId - File ID
+ * @returns {Object|null} - File data or null if not found
+ */
+export const getFileFromStorage = (fileId) => {
+  try {
+    const storageKey = `chatFile_${fileId}`;
+    const fileDataString = localStorage.getItem(storageKey);
+    
+    if (!fileDataString) {
+      console.warn('File not found in localStorage:', fileId);
+      return null;
+    }
+    
+    return JSON.parse(fileDataString);
+  } catch (error) {
+    console.error('Error retrieving file from localStorage:', error);
+    return null;
+  }
+};
+
+/**
+ * Create file metadata document in Firestore (optional)
  * @param {Object} fileData - File data from upload
  * @param {string} chatId - Chat ID
  * @returns {Promise<string>} - Document ID of the created metadata
@@ -230,6 +274,7 @@ export const createFileMetadata = async (fileData, chatId) => {
     const metadataRef = collection(db, 'file-metadata');
     
     const metadataDoc = {
+      fileId: fileData.id,
       fileName: fileData.name,
       fileSize: fileData.size,
       fileType: fileData.type,
@@ -237,8 +282,7 @@ export const createFileMetadata = async (fileData, chatId) => {
       uploadedAt: serverTimestamp(),
       chatId: chatId,
       downloadCount: 0,
-      virusScanStatus: 'pending',
-      storageRef: fileData.storageRef,
+      storageType: 'localStorage',
       category: fileData.category.category
     };
     
@@ -248,35 +292,35 @@ export const createFileMetadata = async (fileData, chatId) => {
     return docRef.id;
   } catch (error) {
     console.error('Failed to create file metadata:', error);
-    // Don't throw here - file upload can succeed without metadata
     console.warn('Continuing without metadata creation');
     return null;
   }
 };
 
 /**
- * Delete file from storage and metadata
- * @param {string} storagePath - Storage reference path
- * @param {string} metadataId - Metadata document ID
- * @returns {Promise<boolean>} - Success status
+ * Delete file from localStorage
+ * @param {string} fileId - File ID
+ * @param {string} chatId - Chat ID
+ * @returns {boolean} - Success status
  */
-export const deleteFile = async (storagePath, metadataId) => {
+export const deleteFile = (fileId, chatId) => {
   try {
-    // Delete from storage
-    if (storagePath) {
-      const storageRef = ref(storage, storagePath);
-      await deleteObject(storageRef);
+    // Remove file data
+    const storageKey = `chatFile_${fileId}`;
+    localStorage.removeItem(storageKey);
+    
+    // Update chat files index
+    if (chatId) {
+      const chatFilesKey = `chatFiles_${chatId}`;
+      const existingFiles = JSON.parse(localStorage.getItem(chatFilesKey) || '[]');
+      const updatedFiles = existingFiles.filter(f => f.fileId !== fileId);
+      localStorage.setItem(chatFilesKey, JSON.stringify(updatedFiles));
     }
     
-    // Delete metadata (if provided)
-    if (metadataId) {
-      await deleteDoc(doc(db, 'file-metadata', metadataId));
-    }
-    
-    console.log('✅ File deleted successfully');
+    console.log('✅ File deleted successfully from localStorage');
     return true;
   } catch (error) {
-    console.error('Failed to delete file:', error);
+    console.error('Failed to delete file from localStorage:', error);
     return false;
   }
 };
@@ -317,121 +361,104 @@ export const isImageFile = (fileName) => {
 };
 
 /**
- * Generate thumbnail for image files
- * @param {File} file - Image file
- * @param {number} maxWidth - Maximum width for thumbnail
- * @param {number} maxHeight - Maximum height for thumbnail
- * @returns {Promise<string>} - Base64 thumbnail data URL
+ * Get download URL for localStorage files
+ * @param {string} fileId - File ID
+ * @returns {string|null} - Download URL or null if file not found
  */
-export const generateThumbnail = (file, maxWidth = 150, maxHeight = 150) => {
-  return new Promise((resolve, reject) => {
-    if (!isImageFile(file.name)) {
-      reject(new Error('File is not an image'));
-      return;
-    }
-
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const img = new Image();
-
-    img.onload = () => {
-      // Calculate new dimensions
-      let { width, height } = img;
-      
-      if (width > height) {
-        if (width > maxWidth) {
-          height = (height * maxWidth) / width;
-          width = maxWidth;
-        }
-      } else {
-        if (height > maxHeight) {
-          width = (width * maxHeight) / height;
-          height = maxHeight;
-        }
-      }
-
-      canvas.width = width;
-      canvas.height = height;
-
-      // Draw and export
-      ctx.drawImage(img, 0, 0, width, height);
-      const thumbnail = canvas.toDataURL('image/jpeg', 0.8);
-      
-      resolve(thumbnail);
-    };
-
-    img.onerror = () => reject(new Error('Failed to load image'));
-    img.src = URL.createObjectURL(file);
-  });
+export const getDownloadUrl = (fileId) => {
+  const fileData = getFileFromStorage(fileId);
+  if (!fileData) {
+    return null;
+  }
+  
+  // Return the base64 data URL
+  return fileData.data;
 };
 
 /**
- * Batch upload multiple files
- * @param {FileList} files - Files to upload
- * @param {string} chatId - Chat ID
- * @param {string} userEmail - User's email
- * @param {Function} onProgress - Progress callback for each file
- * @param {Function} onFileComplete - Callback when each file completes
- * @returns {Promise<Array>} - Array of upload results
+ * Download file from localStorage
+ * @param {string} fileId - File ID
+ * @param {string} fileName - Optional custom filename
  */
-export const batchUploadFiles = async (files, chatId, userEmail, onProgress = null, onFileComplete = null) => {
-  const results = [];
-  const errors = [];
+export const downloadFileFromStorage = (fileId, fileName = null) => {
+  const fileData = getFileFromStorage(fileId);
+  if (!fileData) {
+    console.error('File not found for download:', fileId);
+    return;
+  }
   
-  for (let i = 0; i < files.length; i++) {
-    const file = files[i];
+  try {
+    // Create download link
+    const link = document.createElement('a');
+    link.href = fileData.data;
+    link.download = fileName || fileData.name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
     
-    try {
-      console.log(`Uploading file ${i + 1}/${files.length}: ${file.name}`);
-      
-      const result = await uploadFileToStorage(
-        file, 
-        chatId, 
-        userEmail, 
-        (progress) => {
-          if (onProgress) {
-            onProgress({
-              fileIndex: i,
-              fileName: file.name,
-              ...progress,
-              overallProgress: ((i + progress.progress / 100) / files.length) * 100
-            });
-          }
-        }
-      );
-      
-      // Create metadata (optional - don't fail if this fails)
-      try {
-        const metadataId = await createFileMetadata(result, chatId);
-        if (metadataId) {
-          result.metadataId = metadataId;
-        }
-      } catch (metadataError) {
-        console.warn('Metadata creation failed, but file upload succeeded:', metadataError);
-      }
-      
-      results.push(result);
-      
-      if (onFileComplete) {
-        onFileComplete(result, i, null);
-      }
-      
-      console.log(`✅ File ${i + 1}/${files.length} uploaded successfully`);
-      
-    } catch (error) {
-      console.error(`❌ Failed to upload file ${i + 1}/${files.length}:`, error);
-      errors.push({ file: file.name, error: error.message });
-      
-      if (onFileComplete) {
-        onFileComplete(null, i, error);
+    console.log('✅ File download initiated:', fileData.name);
+  } catch (error) {
+    console.error('Failed to download file:', error);
+  }
+};
+
+/**
+ * Get storage usage info
+ * @returns {Object} - Storage usage information
+ */
+export const getStorageInfo = () => {
+  let totalSize = 0;
+  let fileCount = 0;
+  
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key && key.startsWith('chatFile_')) {
+      const value = localStorage.getItem(key);
+      if (value) {
+        totalSize += value.length;
+        fileCount++;
       }
     }
   }
   
+  // Convert to approximate file size (base64 is ~33% larger than original)
+  const approximateFileSize = Math.round(totalSize * 0.75);
+  
   return {
-    results,
-    errors,
-    successCount: results.length,
-    errorCount: errors.length
+    totalFiles: fileCount,
+    storageUsed: totalSize,
+    approximateFileSize: approximateFileSize,
+    formattedSize: formatFileSize(approximateFileSize)
   };
+};
+
+/**
+ * Clear all stored files (use with caution)
+ * @param {string} chatId - Optional: clear files for specific chat only
+ */
+export const clearStoredFiles = (chatId = null) => {
+  if (chatId) {
+    // Clear files for specific chat
+    const chatFilesKey = `chatFiles_${chatId}`;
+    const chatFiles = JSON.parse(localStorage.getItem(chatFilesKey) || '[]');
+    
+    chatFiles.forEach(fileInfo => {
+      localStorage.removeItem(`chatFile_${fileInfo.fileId}`);
+    });
+    
+    localStorage.removeItem(chatFilesKey);
+  } else {
+    // Clear all chat files
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('chatFile_') || key.startsWith('chatFiles_'))) {
+        keysToRemove.push(key);
+      }
+    }
+    
+    keysToRemove.forEach(key => localStorage.removeItem(key));
+  }
+  
+  console.log('✅ Stored files cleared');
 };
