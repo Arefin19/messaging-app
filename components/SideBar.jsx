@@ -33,6 +33,7 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
   const [chats, setChats] = useState([]);
   const [allUsers, setAllUsers] = useState([]);
   const [currentUserData, setCurrentUserData] = useState(null);
+  const [chatUsersData, setChatUsersData] = useState({}); // New state for chat users
   const [loading, setLoading] = useState(true);
   const [usersLoading, setUsersLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -138,16 +139,24 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
       usersRef,
       (querySnapshot) => {
         const usersData = [];
+        const usersMap = {};
         querySnapshot.forEach((doc) => {
           const userData = doc.data();
+          const userInfo = { 
+            id: doc.id, 
+            ...userData
+          };
+          
           if (userData.email !== user.email.toLowerCase()) {
-            usersData.push({ 
-              id: doc.id, 
-              ...userData
-            });
+            usersData.push(userInfo);
           }
+          
+          // Store all users (including current user) in the map for chat lookups
+          usersMap[userData.email?.toLowerCase()] = userInfo;
         });
+        
         setAllUsers(usersData);
+        setChatUsersData(usersMap); // Store for quick lookup
         setUsersLoading(false);
         console.log(`✅ Loaded ${usersData.length} users from Firestore`);
       },
@@ -253,9 +262,20 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
     setSearchQuery('');
   };
 
+  // Get other user data for a chat
+  const getOtherUserData = (chat) => {
+    const otherUserEmail = getOtherUser(chat.users, user?.email?.toLowerCase() || '');
+    return chatUsersData[otherUserEmail] || { email: otherUserEmail };
+  };
+
   const filteredChats = chats.filter(chat => {
     const otherUserEmail = getOtherUser(chat.users, user?.email?.toLowerCase() || '');
-    return otherUserEmail.toLowerCase().includes(searchQuery.toLowerCase());
+    const otherUserData = chatUsersData[otherUserEmail];
+    const searchTerm = searchQuery.toLowerCase();
+    
+    return otherUserEmail.toLowerCase().includes(searchTerm) ||
+           otherUserData?.displayName?.toLowerCase().includes(searchTerm) ||
+           otherUserData?.email?.toLowerCase().includes(searchTerm);
   });
 
   const filteredUsers = allUsers.filter(userData => {
@@ -472,13 +492,14 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
               </div>
             ) : (
               filteredChats.map((chat) => {
-                const otherUserEmail = getOtherUser(chat.users, user.email?.toLowerCase() || '');
+                const otherUserData = getOtherUserData(chat);
                 const isActive = activeChatId === chat.id;
                 return (
                   <ContactCard 
                     key={chat.id}
                     data={chat}
-                    email={otherUserEmail}
+                    email={otherUserData.email}
+                    otherUserData={otherUserData} // Pass the full user data
                     onClick={() => handleChatSelection(chat)}
                     isActive={isActive}
                   />
