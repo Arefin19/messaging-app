@@ -30,7 +30,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { useRouter } from 'next/router';
 import { useCollectionData, useDocumentData } from 'react-firebase-hooks/firestore';
-import { addDoc, collection, doc, orderBy, query, serverTimestamp, updateDoc, onSnapshot } from 'firebase/firestore';
+import { addDoc, collection, doc, orderBy, query, serverTimestamp, updateDoc, onSnapshot, where } from 'firebase/firestore';
 import { db, auth } from '../firebaseconfig';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import getOtherUser from '../utlis/getOtherUser';
@@ -715,6 +715,10 @@ const ChatBox = () => {
   // Use custom hook to get messages with document IDs
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(true);
+  
+  // FIXED: Added other user data state for proper header display
+  const [otherUserData, setOtherUserData] = useState(null);
+  const [loadingOtherUser, setLoadingOtherUser] = useState(true);
 
   useEffect(() => {
     if (!id) return;
@@ -755,6 +759,61 @@ const ChatBox = () => {
 
   // ImgBB API key - You need to get this from https://api.imgbb.com/
   const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || 'YOUR_IMGBB_API_KEY_HERE';
+  
+  // Get other user email
+  const otherUserEmail = chat ? getOtherUser(chat.users, user?.email || '') : null;
+
+  // FIXED: Fetch other user's data from Firestore for proper header display
+  useEffect(() => {
+    if (!otherUserEmail) {
+      setLoadingOtherUser(false);
+      return;
+    }
+
+    const fetchOtherUserData = async () => {
+      try {
+        setLoadingOtherUser(true);
+        
+        // Query users collection for the other user
+        const usersRef = collection(db, 'users');
+        const q = query(usersRef, where('email', '==', otherUserEmail.toLowerCase()));
+        
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+          if (!querySnapshot.empty) {
+            const userDoc = querySnapshot.docs[0];
+            const userData = userDoc.data();
+            setOtherUserData(userData);
+            console.log('Other user data loaded:', userData);
+          } else {
+            // If no Firestore data, create basic user data
+            setOtherUserData({
+              email: otherUserEmail,
+              displayName: otherUserEmail.split('@')[0],
+              photoURL: null,
+              isOnline: false
+            });
+          }
+          setLoadingOtherUser(false);
+        }, (error) => {
+          console.error('Error fetching other user data:', error);
+          setOtherUserData({
+            email: otherUserEmail,
+            displayName: otherUserEmail.split('@')[0],
+            photoURL: null,
+            isOnline: false
+          });
+          setLoadingOtherUser(false);
+        });
+
+        return () => unsubscribe();
+      } catch (error) {
+        console.error('Error setting up other user listener:', error);
+        setLoadingOtherUser(false);
+      }
+    };
+
+    fetchOtherUserData();
+  }, [otherUserEmail]);
 
   const handleSend = async () => {
     const trimmedText = textBox?.trim() || '';
@@ -1166,12 +1225,12 @@ const ChatBox = () => {
     );
   }
 
-  const otherUserEmail = getOtherUser(chat.users, user?.email || '');
+  // FIXED: Get current user's profile picture for message display (not header)
   const currentUserProfilePic = getUserProfilePicture(user, 32);
 
   return (
     <section className='bg-gray-100 dark:bg-gray-800 relative flex flex-col rounded-xl h-full shadow-lg w-full text-left'>
-      {/* Header */}
+      {/* FIXED Header - Shows OTHER user's profile picture and info */}
       <div className="flex justify-between items-center p-4 bg-white dark:bg-gray-700 rounded-t-xl border-b border-gray-200 dark:border-gray-600 sticky top-0 z-10">
         <div className="flex items-center gap-4">
           <button
@@ -1186,23 +1245,35 @@ const ChatBox = () => {
           </button>
 
           <div className="relative">
-            <img
-              src={currentUserProfilePic}
-              alt="Profile"
-              className="w-10 h-10 rounded-full object-cover border-2 border-blue-400"
-              onError={(e) => handleProfilePictureError(e, user, 40)}
-            />
-            <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white dark:border-gray-700"></div>
+            {loadingOtherUser ? (
+              <div className="w-10 h-10 rounded-full bg-gray-300 dark:bg-gray-600 animate-pulse"></div>
+            ) : (
+              <img
+                src={getUserProfilePicture(otherUserData, 40)}
+                alt={`${otherUserData?.displayName || 'User'}'s profile`}
+                className="w-10 h-10 rounded-full object-cover border-2 border-blue-400"
+                onError={(e) => handleProfilePictureError(e, otherUserData, 40)}
+              />
+            )}
+            
+            {/* Online status indicator */}
+            <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-700 ${
+              otherUserData?.isOnline ? 'bg-green-500' : 'bg-gray-400'
+            }`}></div>
           </div>
 
           <div>
             <h1 className='text-lg font-semibold text-gray-800 dark:text-white'>
-              {otherUserEmail || 'Unknown User'}
+              {otherUserData?.displayName || otherUserEmail?.split('@')[0] || 'Unknown User'}
             </h1>
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              {messages?.[messages.length - 1]?.timestamp?.toDate()
-                ? `Last seen ${new Date(messages[messages.length - 1].timestamp.toDate()).toLocaleTimeString()}`
-                : 'Online'}
+              {otherUserData?.isOnline ? (
+                'Online'
+              ) : otherUserData?.lastSeen ? (
+                `Last seen ${new Date(otherUserData.lastSeen.toDate()).toLocaleString()}`
+              ) : (
+                'Offline'
+              )}
             </p>
           </div>
         </div>
@@ -1264,7 +1335,7 @@ const ChatBox = () => {
                 isSameSender={i > 0 && messages[i - 1].sender === msg.sender}
                 isLastMessage={i === messages.length - 1}
                 userPhoto={currentUserProfilePic}
-                otherUserPhoto={null}
+                otherUserPhoto={getUserProfilePicture(otherUserData, 32)}
                 imageUrl={msg.imageUrl}
                 images={msg.images}
                 files={msg.files}
@@ -1359,6 +1430,8 @@ const ChatBox = () => {
         </div>
       )}
 
+      {/* Message input */}
+      <div className="p-3 bg-white dark:bg-gray-700 rounded-b-xl border-t border-gray-200 dark:border-gray-600 relative">
       {/* Message input */}
       <div className="p-3 bg-white dark:bg-gray-700 rounded-b-xl border-t border-gray-200 dark:border-gray-600 relative">
         {error && (
@@ -1467,7 +1540,7 @@ const ChatBox = () => {
             )}
           </button>
         </div>
-
+      </div>
       </div>
     </section>
   );
