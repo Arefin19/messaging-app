@@ -35,17 +35,17 @@ import { db, auth } from '../firebaseconfig';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import getOtherUser from '../utlis/getOtherUser';
 import { getUserProfilePicture, handleProfilePictureError } from '../utlis/profilePicture';
-import { 
-  uploadToImgBB, 
-  validateImageFile, 
-  createImagePreview, 
-  generateFallbackAvatar 
+import {
+  uploadToImgBB,
+  validateImageFile,
+  createImagePreview,
+  generateFallbackAvatar
 } from '../utlis/imgbbUpload';
-import { 
-  validateFile, 
-  uploadFileToStorage, 
-  createFileMetadata, 
-  formatFileSize, 
+import {
+  validateFile,
+  uploadFileToStorage,
+  createFileMetadata,
+  formatFileSize,
   getFileCategory,
   getFileIcon,
   isImageFile,
@@ -80,7 +80,7 @@ const FileTypeSelector = ({ onFileTypeSelect, onClose, isVisible }) => {
     <div className="absolute bottom-14 left-0 bg-white dark:bg-gray-700 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 p-3 w-64 z-50">
       <div className="flex justify-between items-center mb-3">
         <h3 className="text-sm font-medium text-gray-800 dark:text-white">Choose file type</h3>
-        <button 
+        <button
           onClick={onClose}
           className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
         >
@@ -106,7 +106,7 @@ const FileTypeSelector = ({ onFileTypeSelect, onClose, isVisible }) => {
             <div>
               <div className="font-medium">{type.label}</div>
               <div className="text-xs text-gray-500 dark:text-gray-400">
-                {type.extensions.length > 0 
+                {type.extensions.length > 0
                   ? type.extensions.slice(0, 3).join(', ') + (type.extensions.length > 3 ? '...' : '')
                   : 'Other file types'
                 }
@@ -125,13 +125,13 @@ const FileTypeSelector = ({ onFileTypeSelect, onClose, isVisible }) => {
 };
 
 // Enhanced File Preview Component
-const FilePreview = ({ 
-  file, 
-  fileInfo, 
-  onRemove, 
-  uploadProgress = null, 
+const FilePreview = ({
+  file,
+  fileInfo,
+  onRemove,
+  uploadProgress = null,
   isUploading = false,
-  error = null 
+  error = null
 }) => {
   const [preview, setPreview] = useState(null);
 
@@ -150,15 +150,14 @@ const FilePreview = ({
 
   return (
     <div className="relative inline-block mr-2 mb-2 group">
-      <div className={`w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 flex flex-col items-center justify-center p-2 ${
-        isUploading ? 'opacity-60' : ''
-      } ${error ? 'border-red-300 bg-red-50 dark:bg-red-900/20' : ''}`}>
-        
+      <div className={`w-20 h-20 rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 flex flex-col items-center justify-center p-2 ${isUploading ? 'opacity-60' : ''
+        } ${error ? 'border-red-300 bg-red-50 dark:bg-red-900/20' : ''}`}>
+
         {/* Image preview */}
         {preview ? (
-          <img 
-            src={preview} 
-            alt="Preview" 
+          <img
+            src={preview}
+            alt="Preview"
             className="w-full h-full object-cover rounded"
           />
         ) : (
@@ -167,14 +166,14 @@ const FilePreview = ({
             <div className="text-blue-500 text-xl mb-1">
               {fileIcon}
             </div>
-            
+
             {/* File extension */}
             <div className="text-xs font-medium text-gray-600 dark:text-gray-300 uppercase">
               {file.name.split('.').pop()}
             </div>
           </>
         )}
-        
+
         {/* Upload progress overlay */}
         {isUploading && (
           <div className="absolute inset-0 bg-black bg-opacity-50 rounded-lg flex items-center justify-center">
@@ -186,7 +185,7 @@ const FilePreview = ({
             </div>
           </div>
         )}
-        
+
         {/* Error overlay */}
         {error && (
           <div className="absolute inset-0 bg-red-500 bg-opacity-20 rounded-lg flex items-center justify-center">
@@ -196,7 +195,7 @@ const FilePreview = ({
           </div>
         )}
       </div>
-      
+
       {/* File info */}
       <div className="mt-1 text-center">
         <div className="text-xs font-medium text-gray-700 dark:text-gray-300 truncate max-w-20" title={file.name}>
@@ -206,7 +205,7 @@ const FilePreview = ({
           {formatFileSize(file.size)}
         </div>
       </div>
-      
+
       {/* Remove button */}
       {!isUploading && (
         <button
@@ -217,7 +216,7 @@ const FilePreview = ({
           <FontAwesomeIcon icon={faTimes} />
         </button>
       )}
-      
+
       {/* Error tooltip */}
       {error && (
         <div className="absolute -bottom-8 left-1/2 transform -translate-x-1/2 bg-red-600 text-white text-xs px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10">
@@ -295,7 +294,7 @@ const EmojiPicker = ({ onEmojiSelect, onClose, isVisible }) => {
     <div className="absolute bottom-14 left-0 bg-white dark:bg-gray-700 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 p-4 w-80 max-h-60 overflow-y-auto z-50">
       <div className="flex justify-between items-center mb-3">
         <h3 className="text-sm font-medium text-gray-800 dark:text-white">Choose an emoji</h3>
-        <button 
+        <button
           onClick={onClose}
           className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
         >
@@ -327,10 +326,10 @@ const QuickReactionPicker = ({ onReactionSelect, onClose, isVisible, position = 
   if (!isVisible) return null;
 
   return (
-    <div 
+    <div
       className="fixed bg-white dark:bg-gray-700 rounded-full shadow-xl border border-gray-200 dark:border-gray-600 p-2 z-50 flex gap-1"
-      style={{ 
-        top: position.top - 60, 
+      style={{
+        top: position.top - 60,
         left: Math.max(10, position.left - 120),
         transform: 'translateX(0)'
       }}
@@ -358,30 +357,30 @@ const QuickReactionPicker = ({ onReactionSelect, onClose, isVisible, position = 
 };
 
 // Message context menu component
-const MessageContextMenu = ({ 
-  isVisible, 
-  position, 
-  onReply, 
-  onReact, 
-  onCopy, 
-  onDelete, 
-  onClose, 
-  canDelete 
+const MessageContextMenu = ({
+  isVisible,
+  position,
+  onReply,
+  onReact,
+  onCopy,
+  onDelete,
+  onClose,
+  canDelete
 }) => {
   if (!isVisible) return null;
 
   return (
     <>
       {/* Backdrop */}
-      <div 
-        className="fixed inset-0 z-40" 
+      <div
+        className="fixed inset-0 z-40"
         onClick={onClose}
       />
-      
-      <div 
+
+      <div
         className="fixed bg-white dark:bg-gray-700 rounded-lg shadow-xl border border-gray-200 dark:border-gray-600 py-2 z-50 min-w-[150px]"
-        style={{ 
-          top: position.top, 
+        style={{
+          top: position.top,
           left: position.left,
           transform: 'translateY(-50%)'
         }}
@@ -428,16 +427,15 @@ const MessageReactions = ({ reactions, onReactionClick, currentUserEmail }) => {
       {Object.entries(reactions).map(([emoji, users]) => {
         const hasReacted = users.includes(currentUserEmail);
         const count = users.length;
-        
+
         return (
           <button
             key={emoji}
             onClick={() => onReactionClick(emoji)}
-            className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs transition-all hover:scale-105 ${
-              hasReacted 
-                ? 'bg-blue-100 dark:bg-blue-900/30 border border-blue-300 dark:border-blue-600' 
+            className={`flex items-center gap-1 px-2 py-1 rounded-full text-xs transition-all hover:scale-105 ${hasReacted
+                ? 'bg-blue-100 dark:bg-blue-900/30 border border-blue-300 dark:border-blue-600'
                 : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600'
-            }`}
+              }`}
           >
             <span>{emoji}</span>
             <span className="text-xs">{count}</span>
@@ -448,17 +446,17 @@ const MessageReactions = ({ reactions, onReactionClick, currentUserEmail }) => {
   );
 };
 
-const Message = ({ 
+const Message = ({
   messageId,
   messageIndex,
-  sender, 
-  text, 
-  time, 
-  isSameSender, 
-  isLastMessage, 
-  userPhoto, 
-  otherUserPhoto, 
-  imageUrl, 
+  sender,
+  text,
+  time,
+  isSameSender,
+  isLastMessage,
+  userPhoto,
+  otherUserPhoto,
+  imageUrl,
   images,
   files,
   replyTo,
@@ -569,11 +567,10 @@ const Message = ({
             )}
 
             <div
-              className={`px-4 py-2 rounded-lg relative cursor-pointer select-none ${
-                sender
+              className={`px-4 py-2 rounded-lg relative cursor-pointer select-none ${sender
                   ? 'bg-blue-500 text-white rounded-tr-none'
                   : 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-white rounded-tl-none'
-              } ${isSameSender ? sender ? 'rounded-tr-lg' : 'rounded-tl-lg' : ''}`}
+                } ${isSameSender ? sender ? 'rounded-tr-lg' : 'rounded-tl-lg' : ''}`}
               onContextMenu={handleLongPress}
               onDoubleClick={handleDoubleClick}
               onTouchStart={(e) => {
@@ -583,7 +580,7 @@ const Message = ({
                     handleLongPress(e);
                   }
                 }, 500);
-                
+
                 e.currentTarget.addEventListener('touchend', () => {
                   clearTimeout(timer);
                 }, { once: true });
@@ -591,9 +588,8 @@ const Message = ({
             >
               {/* Reply preview */}
               {replyTo && (
-                <div className={`mb-2 p-2 rounded border-l-2 ${
-                  sender ? 'border-blue-300 bg-blue-400/20' : 'border-gray-400 bg-gray-300/20'
-                }`}>
+                <div className={`mb-2 p-2 rounded border-l-2 ${sender ? 'border-blue-300 bg-blue-400/20' : 'border-gray-400 bg-gray-300/20'
+                  }`}>
                   <p className="text-xs opacity-75">
                     Replying to {replyTo.sender === currentUserEmail ? 'yourself' : 'other user'}
                   </p>
@@ -605,9 +601,9 @@ const Message = ({
               {allImages.length > 0 && (
                 <div className="mb-2">
                   {allImages.length === 1 ? (
-                    <img 
-                      src={allImages[0]} 
-                      alt="Shared image" 
+                    <img
+                      src={allImages[0]}
+                      alt="Shared image"
                       className="max-w-full h-auto rounded-lg cursor-pointer hover:opacity-90 transition-opacity"
                       onClick={() => window.open(allImages[0], '_blank')}
                     />
@@ -615,9 +611,9 @@ const Message = ({
                     <div className="grid grid-cols-2 gap-1">
                       {allImages.slice(0, 4).map((img, index) => (
                         <div key={index} className="relative">
-                          <img 
-                            src={img} 
-                            alt={`Shared image ${index + 1}`} 
+                          <img
+                            src={img}
+                            alt={`Shared image ${index + 1}`}
                             className="w-full h-20 object-cover rounded cursor-pointer hover:opacity-90 transition-opacity"
                             onClick={() => window.open(img, '_blank')}
                           />
@@ -671,7 +667,7 @@ const Message = ({
             </div>
 
             {/* Message reactions */}
-            <MessageReactions 
+            <MessageReactions
               reactions={reactions}
               onReactionClick={handleReactionClick}
               currentUserEmail={currentUserEmail}
@@ -711,11 +707,11 @@ const ChatBox = () => {
   const { id } = router.query;
   const messagesRef = collection(db, `chats/${id}/messages`);
   const messagesQuery = query(messagesRef, orderBy('timestamp'));
-  
+
   // Use custom hook to get messages with document IDs
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(true);
-  
+
   // FIXED: Added other user data state for proper header display
   const [otherUserData, setOtherUserData] = useState(null);
   const [loadingOtherUser, setLoadingOtherUser] = useState(true);
@@ -740,7 +736,7 @@ const ChatBox = () => {
 
     return () => unsubscribe();
   }, [id]);
-  
+
   const [chat, loadingChat] = useDocumentData(doc(db, `chats/${id}`));
   const scrollEnd = useRef();
   const textInputRef = useRef();
@@ -759,7 +755,7 @@ const ChatBox = () => {
 
   // ImgBB API key - You need to get this from https://api.imgbb.com/
   const IMGBB_API_KEY = process.env.NEXT_PUBLIC_IMGBB_API_KEY || 'YOUR_IMGBB_API_KEY_HERE';
-  
+
   // Get other user email
   const otherUserEmail = chat ? getOtherUser(chat.users, user?.email || '') : null;
 
@@ -773,11 +769,11 @@ const ChatBox = () => {
     const fetchOtherUserData = async () => {
       try {
         setLoadingOtherUser(true);
-        
+
         // Query users collection for the other user
         const usersRef = collection(db, 'users');
         const q = query(usersRef, where('email', '==', otherUserEmail.toLowerCase()));
-        
+
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
           if (!querySnapshot.empty) {
             const userDoc = querySnapshot.docs[0];
@@ -831,19 +827,19 @@ const ChatBox = () => {
       if (selectedFiles.length > 0) {
         setIsUploading(true);
         setUploadProgress('Starting file upload...');
-        
+
         for (let i = 0; i < selectedFiles.length; i++) {
           const file = selectedFiles[i];
           try {
             setUploadProgress(`Processing file ${i + 1} of ${selectedFiles.length}...`);
             console.log(`Processing file ${i + 1}:`, file.name);
-            
+
             // Validate file before upload
             const validation = validateFile(file);
             if (!validation.isValid) {
               throw new Error(`Invalid file ${file.name}: ${validation.error}`);
             }
-            
+
             if (isImageFile(file.name)) {
               // Handle images - try ImgBB first, fallback to localStorage
               if (IMGBB_API_KEY && IMGBB_API_KEY !== 'YOUR_IMGBB_API_KEY_HERE') {
@@ -873,7 +869,7 @@ const ChatBox = () => {
                     setUploadProgress(`Storing ${file.name}: ${Math.round(progress.progress)}%`);
                   }
                 );
-                
+
                 // For localStorage images, we store them as files but also add to imageUrls
                 // Check if it's a base64 data URL
                 if (uploadResult.url.startsWith('localStorage://')) {
@@ -895,7 +891,7 @@ const ChatBox = () => {
                   setUploadProgress(`Storing ${file.name}: ${Math.round(progress.progress)}%`);
                 }
               );
-              
+
               // Create metadata document (optional)
               try {
                 const metadataId = await createFileMetadata(uploadResult, id);
@@ -905,12 +901,12 @@ const ChatBox = () => {
               } catch (metadataError) {
                 console.warn('Failed to create metadata, continuing:', metadataError);
               }
-              
+
               fileUrls.push(uploadResult);
             }
-            
+
             console.log(`✅ File ${i + 1} processed successfully`);
-            
+
           } catch (uploadError) {
             console.error(`Failed to process file ${i + 1}:`, uploadError);
             throw new Error(`Failed to process ${file.name}: ${uploadError.message}`);
@@ -954,11 +950,11 @@ const ChatBox = () => {
       // Save message to Firestore
       setUploadProgress('Saving message...');
       console.log('Saving message with data:', messageData);
-      
+
       await addDoc(messagesRef, messageData);
 
       // Update chat's last message
-      const lastMessageText = trimmedText || 
+      const lastMessageText = trimmedText ||
         (imageUrls.length > 0 ? `📷 ${imageUrls.length > 1 ? `${imageUrls.length} Images` : 'Image'}` : '') +
         (fileUrls.length > 0 ? `📎 ${fileUrls.length > 1 ? `${fileUrls.length} Files` : fileUrls[0]?.name || 'File'}` : '');
 
@@ -985,17 +981,17 @@ const ChatBox = () => {
 
   const handleReply = (messageId, messageText, isOwnMessage) => {
     if (!messageId) return;
-    
+
     console.log('Handling reply:', { messageId, messageText, isOwnMessage });
-    
+
     // Find the message using multiple matching strategies
     const message = messages?.find((msg, index) => {
       return msg.id === messageId ||
-             msg.timestamp?.seconds === messageId || 
-             index.toString() === messageId.toString() ||
-             `${msg.timestamp?.seconds || index}` === messageId.toString();
+        msg.timestamp?.seconds === messageId ||
+        index.toString() === messageId.toString() ||
+        `${msg.timestamp?.seconds || index}` === messageId.toString();
     });
-    
+
     setReplyingTo({
       messageId: messageId,
       message: messageText,
@@ -1010,20 +1006,20 @@ const ChatBox = () => {
     try {
       console.log('Handling reaction:', { messageId, emoji, userEmail: user.email });
       console.log('Available messages:', messages.map(m => ({ id: m.id, timestamp: m.timestamp?.seconds })));
-      
+
       // Find the message in our current messages array
       const message = messages?.find((msg, index) => {
-        const match = msg.id === messageId || 
-               msg.timestamp?.seconds === messageId || 
-               index.toString() === messageId.toString() ||
-               `${msg.timestamp?.seconds || index}` === messageId.toString();
-        
+        const match = msg.id === messageId ||
+          msg.timestamp?.seconds === messageId ||
+          index.toString() === messageId.toString() ||
+          `${msg.timestamp?.seconds || index}` === messageId.toString();
+
         if (match) {
           console.log('Found matching message:', { msgId: msg.id, searchId: messageId, index });
         }
         return match;
       });
-      
+
       if (!message) {
         console.error('Message not found for reaction. MessageId:', messageId);
         console.error('Available message IDs:', messages.map(m => m.id));
@@ -1032,7 +1028,7 @@ const ChatBox = () => {
       }
 
       console.log('Found message for reaction:', { id: message.id, timestamp: message.timestamp?.seconds });
-      
+
       // Use the message ID directly
       const docId = message.id;
       if (!docId) {
@@ -1042,14 +1038,14 @@ const ChatBox = () => {
       }
 
       console.log('Using document ID:', docId);
-      
+
       const messageRef = doc(db, `chats/${id}/messages`, docId);
-      
+
       const currentReactions = message.reactions || {};
       const currentUsersForEmoji = currentReactions[emoji] || [];
-      
+
       let updatedReactions = { ...currentReactions };
-      
+
       if (currentUsersForEmoji.includes(user.email)) {
         // Remove reaction
         updatedReactions[emoji] = currentUsersForEmoji.filter(email => email !== user.email);
@@ -1068,9 +1064,9 @@ const ChatBox = () => {
       await updateDoc(messageRef, {
         reactions: updatedReactions
       });
-      
+
       console.log('Reaction updated successfully');
-      
+
       // Clear any previous errors
       setError(null);
     } catch (error) {
@@ -1094,12 +1090,12 @@ const ChatBox = () => {
 
   const handleCopyMessage = () => {
     if (!contextMenu.messageId) return;
-    
+
     const message = messages?.find((msg, index) => {
       return msg.id === contextMenu.messageId ||
-             msg.timestamp?.seconds === contextMenu.messageId || 
-             index.toString() === contextMenu.messageId.toString() ||
-             `${msg.timestamp?.seconds || index}` === contextMenu.messageId.toString();
+        msg.timestamp?.seconds === contextMenu.messageId ||
+        index.toString() === contextMenu.messageId.toString() ||
+        `${msg.timestamp?.seconds || index}` === contextMenu.messageId.toString();
     });
     if (message?.message) {
       navigator.clipboard.writeText(message.message);
@@ -1255,11 +1251,10 @@ const ChatBox = () => {
                 onError={(e) => handleProfilePictureError(e, otherUserData, 40)}
               />
             )}
-            
+
             {/* Online status indicator */}
-            <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-700 ${
-              otherUserData?.isOnline ? 'bg-green-500' : 'bg-gray-400'
-            }`}></div>
+            <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-700 ${otherUserData?.isOnline ? 'bg-green-500' : 'bg-gray-400'
+              }`}></div>
           </div>
 
           <div>
@@ -1289,12 +1284,7 @@ const ChatBox = () => {
           />
           {showOptions && (
             <div className="absolute right-0 top-10 w-48 bg-white dark:bg-gray-700 rounded-lg shadow-xl py-1 z-20 border border-gray-200 dark:border-gray-600">
-              <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200">
-                View profile
-              </button>
-              <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200">
-                Mute notifications
-              </button>
+              
               <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 text-red-500">
                 Delete chat
               </button>
@@ -1358,12 +1348,12 @@ const ChatBox = () => {
         position={contextMenu.position}
         onReply={() => {
           if (!contextMenu.messageId) return;
-          
+
           const message = messages?.find((msg, index) => {
             return msg.id === contextMenu.messageId ||
-                   msg.timestamp?.seconds === contextMenu.messageId || 
-                   index.toString() === contextMenu.messageId.toString() ||
-                   `${msg.timestamp?.seconds || index}` === contextMenu.messageId.toString();
+              msg.timestamp?.seconds === contextMenu.messageId ||
+              index.toString() === contextMenu.messageId.toString() ||
+              `${msg.timestamp?.seconds || index}` === contextMenu.messageId.toString();
           });
           if (message) {
             handleReply(contextMenu.messageId, message.message, message.sender === user?.email);
@@ -1382,9 +1372,9 @@ const ChatBox = () => {
         onClose={() => setContextMenu({ isVisible: false, messageId: null, position: { top: 0, left: 0 } })}
         canDelete={contextMenu.messageId ? messages?.find((msg, index) => {
           return msg.id === contextMenu.messageId ||
-                 msg.timestamp?.seconds === contextMenu.messageId || 
-                 index.toString() === contextMenu.messageId.toString() ||
-                 `${msg.timestamp?.seconds || index}` === contextMenu.messageId.toString();
+            msg.timestamp?.seconds === contextMenu.messageId ||
+            index.toString() === contextMenu.messageId.toString() ||
+            `${msg.timestamp?.seconds || index}` === contextMenu.messageId.toString();
         })?.sender === user?.email : false}
       />
 
@@ -1413,9 +1403,9 @@ const ChatBox = () => {
         <div className="p-3 bg-gray-100 dark:bg-gray-700 border-t border-gray-300 dark:border-gray-600">
           <div className="flex flex-wrap">
             {selectedFiles.map((file, index) => (
-              <FilePreview 
-                key={index} 
-                file={file} 
+              <FilePreview
+                key={index}
+                file={file}
                 onRemove={() => removeFile(index)}
                 uploadProgress={uploadProgress}
                 isUploading={isUploading}
@@ -1432,115 +1422,114 @@ const ChatBox = () => {
 
       {/* Message input */}
       <div className="p-3 bg-white dark:bg-gray-700 rounded-b-xl border-t border-gray-200 dark:border-gray-600 relative">
-      {/* Message input */}
-      <div className="p-3 bg-white dark:bg-gray-700 rounded-b-xl border-t border-gray-200 dark:border-gray-600 relative">
-        {error && (
-          <div className="mb-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300 rounded-lg text-sm">
-            {error}
-          </div>
-        )}
+        {/* Message input */}
+        <div className="p-3 bg-white dark:bg-gray-700 rounded-b-xl border-t border-gray-200 dark:border-gray-600 relative">
+          {error && (
+            <div className="mb-2 px-4 py-2 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-300 rounded-lg text-sm">
+              {error}
+            </div>
+          )}
 
-        {/* Upload progress */}
-        {uploadProgress && (
-          <div className="mb-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 rounded-lg text-sm">
-            {uploadProgress}
-          </div>
-        )}
+          {/* Upload progress */}
+          {uploadProgress && (
+            <div className="mb-2 px-4 py-2 bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-300 rounded-lg text-sm">
+              {uploadProgress}
+            </div>
+          )}
 
-        <div className="flex items-center gap-2">
-          {/* Emoji picker container */}
-          <div className="emoji-picker-container relative">
-            <button 
-              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
-              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              disabled={isSending}
-            >
-              <FontAwesomeIcon icon={faFaceSmile} />
-            </button>
-            <EmojiPicker 
-              isVisible={showEmojiPicker}
-              onEmojiSelect={handleEmojiSelect}
-              onClose={() => setShowEmojiPicker(false)}
-            />
-          </div>
-
-          {/* Image upload container */}
-          <div className="image-upload-container relative">
-            <button 
-              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50"
-              onClick={() => {
-                const input = document.createElement('input');
-                input.type = 'file';
-                input.multiple = true;
-                input.accept = 'image/*';
-                input.onchange = (e) => handleFileSelect(e.target.files);
-                input.click();
-              }}
-              disabled={isSending || selectedFiles.length >= 10}
-              title={selectedFiles.length >= 10 ? "Maximum 10 files allowed" : "Add images"}
-            >
-              <FontAwesomeIcon icon={faImage} />
-            </button>
-          </div>
-
-          {/* File upload container */}
-          <div className="file-selector-container relative">
-            <button 
-              className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50"
-              onClick={() => setShowFileTypeSelector(!showFileTypeSelector)}
-              disabled={isSending || selectedFiles.length >= 10}
-              title={selectedFiles.length >= 10 ? "Maximum 10 files allowed" : "Add files"}
-            >
-              <FontAwesomeIcon icon={faCloudUpload} />
-            </button>
-            <FileTypeSelector
-              isVisible={showFileTypeSelector}
-              onFileTypeSelect={handleFileSelect}
-              onClose={() => setShowFileTypeSelector(false)}
-            />
-          </div>
-
-          <div className="flex-1 relative">
-            <input
-              type="text"
-              placeholder='Type a message...'
-              className='w-full px-4 py-3 pr-12 rounded-full bg-gray-100 dark:bg-gray-600 border-none focus:ring-2 focus:ring-blue-400 outline-none transition-all text-gray-800 dark:text-white placeholder-gray-500 dark:placeholder-gray-400'
-              spellCheck={false}
-              value={textBox}
-              onChange={handleInputChange}
-              ref={textInputRef}
-              onKeyDown={handleKeys}
-              disabled={isSending}
-            />
-            {textBox && (
+          <div className="flex items-center gap-2">
+            {/* Emoji picker container */}
+            <div className="emoji-picker-container relative">
               <button
-                onClick={() => setTextBox('')}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
-                aria-label="Clear message"
+                className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
+                onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+                disabled={isSending}
               >
-                ×
+                <FontAwesomeIcon icon={faFaceSmile} />
               </button>
-            )}
-          </div>
+              <EmojiPicker
+                isVisible={showEmojiPicker}
+                onEmojiSelect={handleEmojiSelect}
+                onClose={() => setShowEmojiPicker(false)}
+              />
+            </div>
 
-          <button
-            onClick={handleSend}
-            disabled={(!textBox?.trim() && selectedFiles.length === 0) || isSending}
-            className={`p-3 rounded-full transition-all outline-none ${
-              (!textBox?.trim() && selectedFiles.length === 0) || isSending
-                ? 'bg-gray-300 dark:bg-gray-600 cursor-not-allowed text-gray-500'
-                : 'bg-blue-500 hover:bg-blue-600 text-white shadow-md hover:shadow-lg'
-            }`}
-            aria-label="Send message"
-          >
-            {isSending ? (
-              <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
-            ) : (
-              <FontAwesomeIcon icon={faPaperPlane} />
-            )}
-          </button>
+            {/* Image upload container */}
+            <div className="image-upload-container relative">
+              <button
+                className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50"
+                onClick={() => {
+                  const input = document.createElement('input');
+                  input.type = 'file';
+                  input.multiple = true;
+                  input.accept = 'image/*';
+                  input.onchange = (e) => handleFileSelect(e.target.files);
+                  input.click();
+                }}
+                disabled={isSending || selectedFiles.length >= 10}
+                title={selectedFiles.length >= 10 ? "Maximum 10 files allowed" : "Add images"}
+              >
+                <FontAwesomeIcon icon={faImage} />
+              </button>
+            </div>
+
+            {/* File upload container */}
+            <div className="file-selector-container relative">
+              <button
+                className="p-2 rounded-full hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 disabled:opacity-50"
+                onClick={() => setShowFileTypeSelector(!showFileTypeSelector)}
+                disabled={isSending || selectedFiles.length >= 10}
+                title={selectedFiles.length >= 10 ? "Maximum 10 files allowed" : "Add files"}
+              >
+                <FontAwesomeIcon icon={faCloudUpload} />
+              </button>
+              <FileTypeSelector
+                isVisible={showFileTypeSelector}
+                onFileTypeSelect={handleFileSelect}
+                onClose={() => setShowFileTypeSelector(false)}
+              />
+            </div>
+
+            <div className="flex-1 relative">
+              <input
+                type="text"
+                placeholder='Type a message...'
+                className='w-full px-4 py-3 pr-12 rounded-full bg-gray-100 dark:bg-gray-600 border-none focus:ring-2 focus:ring-blue-400 outline-none transition-all text-gray-800 dark:text-white placeholder-gray-500 dark:placeholder-gray-400'
+                spellCheck={false}
+                value={textBox}
+                onChange={handleInputChange}
+                ref={textInputRef}
+                onKeyDown={handleKeys}
+                disabled={isSending}
+              />
+              {textBox && (
+                <button
+                  onClick={() => setTextBox('')}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:hover:text-gray-300"
+                  aria-label="Clear message"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+
+            <button
+              onClick={handleSend}
+              disabled={(!textBox?.trim() && selectedFiles.length === 0) || isSending}
+              className={`p-3 rounded-full transition-all outline-none ${(!textBox?.trim() && selectedFiles.length === 0) || isSending
+                  ? 'bg-gray-300 dark:bg-gray-600 cursor-not-allowed text-gray-500'
+                  : 'bg-blue-500 hover:bg-blue-600 text-white shadow-md hover:shadow-lg'
+                }`}
+              aria-label="Send message"
+            >
+              {isSending ? (
+                <FontAwesomeIcon icon={faSpinner} className="animate-spin" />
+              ) : (
+                <FontAwesomeIcon icon={faPaperPlane} />
+              )}
+            </button>
+          </div>
         </div>
-      </div>
       </div>
     </section>
   );

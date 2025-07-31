@@ -415,16 +415,7 @@ const SideBar = ({ onChatSelect, darkMode, toggleDarkMode, activeChatId }) => {
                   {darkMode ? 'Light Mode' : 'Dark Mode'}
                 </button>
               )}
-              <button 
-                className="w-full px-4 py-2 text-left hover:bg-gray-600 flex items-center gap-2"
-                onClick={() => {
-                  console.log('Current user profile data:', displayUserData);
-                  debugUserProfile(user, currentUserData);
-                }}
-              >
-                <FontAwesomeIcon icon={faUser} />
-                Debug Profile
-              </button>
+              
               <button 
                 className="w-full px-4 py-2 text-left hover:bg-gray-600 flex items-center gap-2"
                 onClick={() => {
