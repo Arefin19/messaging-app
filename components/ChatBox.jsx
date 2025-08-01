@@ -30,7 +30,7 @@ import {
 } from '@fortawesome/free-solid-svg-icons';
 import { useRouter } from 'next/router';
 import { useCollectionData, useDocumentData } from 'react-firebase-hooks/firestore';
-import { addDoc, collection, doc, orderBy, query, serverTimestamp, updateDoc, onSnapshot, where } from 'firebase/firestore';
+import { addDoc, collection, doc, orderBy, query, serverTimestamp, updateDoc, onSnapshot, where, deleteDoc, getDocs } from 'firebase/firestore';
 import { db, auth } from '../firebaseconfig';
 import { useAuthState } from 'react-firebase-hooks/auth';
 import getOtherUser from '../utlis/getOtherUser';
@@ -712,9 +712,15 @@ const ChatBox = () => {
   const [messages, setMessages] = useState([]);
   const [loadingMessages, setLoadingMessages] = useState(true);
 
-  // FIXED: Added other user data state for proper header display
+  // State for other user data and online status
   const [otherUserData, setOtherUserData] = useState(null);
   const [loadingOtherUser, setLoadingOtherUser] = useState(true);
+  const [isOtherUserOnline, setIsOtherUserOnline] = useState(false);
+  const [lastSeen, setLastSeen] = useState(null);
+
+  // State for deletion
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [isDeletingChat, setIsDeletingChat] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -759,7 +765,7 @@ const ChatBox = () => {
   // Get other user email
   const otherUserEmail = chat ? getOtherUser(chat.users, user?.email || '') : null;
 
-  // FIXED: Fetch other user's data from Firestore for proper header display
+  // Fetch other user's data and online status
   useEffect(() => {
     if (!otherUserEmail) {
       setLoadingOtherUser(false);
@@ -779,29 +785,57 @@ const ChatBox = () => {
             const userDoc = querySnapshot.docs[0];
             const userData = userDoc.data();
             setOtherUserData(userData);
+            
+            // Set online status and last seen
+            if (userData.isOnline !== undefined) {
+              setIsOtherUserOnline(userData.isOnline);
+            }
+            if (userData.lastSeen) {
+              setLastSeen(userData.lastSeen.toDate());
+            }
+            
             console.log('Other user data loaded:', userData);
           } else {
             // If no Firestore data, create basic user data
-            setOtherUserData({
+            const fallbackData = {
               email: otherUserEmail,
               displayName: otherUserEmail.split('@')[0],
               photoURL: null,
               isOnline: false
-            });
+            };
+            setOtherUserData(fallbackData);
+            setIsOtherUserOnline(false);
           }
           setLoadingOtherUser(false);
         }, (error) => {
           console.error('Error fetching other user data:', error);
-          setOtherUserData({
+          const fallbackData = {
             email: otherUserEmail,
             displayName: otherUserEmail.split('@')[0],
             photoURL: null,
             isOnline: false
-          });
+          };
+          setOtherUserData(fallbackData);
+          setIsOtherUserOnline(false);
           setLoadingOtherUser(false);
         });
 
-        return () => unsubscribe();
+        // Also listen to the user's presence status
+        const presenceRef = doc(db, `presence/${otherUserEmail}`);
+        const presenceUnsubscribe = onSnapshot(presenceRef, (doc) => {
+          const presenceData = doc.data();
+          if (presenceData) {
+            setIsOtherUserOnline(presenceData.status === 'online');
+            if (presenceData.lastChanged) {
+              setLastSeen(presenceData.lastChanged.toDate());
+            }
+          }
+        });
+
+        return () => {
+          unsubscribe();
+          presenceUnsubscribe();
+        };
       } catch (error) {
         console.error('Error setting up other user listener:', error);
         setLoadingOtherUser(false);
@@ -810,6 +844,90 @@ const ChatBox = () => {
 
     fetchOtherUserData();
   }, [otherUserEmail]);
+
+  /**
+   * Handle soft delete (mark as deleted for current user)
+   */
+  const handleSoftDeleteChat = async () => {
+    if (!user?.email || !id || isDeletingChat) return;
+
+    try {
+      setIsDeletingChat(true);
+      
+      // Create deletedBy field with current user's email (replace . with _)
+      const userKey = user.email.replace('.', '_');
+      
+      await updateDoc(doc(db, `chats/${id}`), {
+        [`deletedBy.${userKey}`]: serverTimestamp()
+      });
+
+      console.log('✅ Chat soft deleted for user:', user.email);
+      
+      // Navigate back to chat list
+      router.push('/');
+      
+    } catch (error) {
+      console.error('Error soft deleting chat:', error);
+      setError(`Failed to delete chat: ${error.message}`);
+    } finally {
+      setIsDeletingChat(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
+  /**
+   * Handle hard delete (completely delete chat and all messages)
+   * Only available if user is the only participant or both users have soft-deleted
+   */
+  const handleHardDeleteChat = async () => {
+    if (!user?.email || !id || isDeletingChat) return;
+
+    try {
+      setIsDeletingChat(true);
+      
+      // First delete all messages in the chat
+      const messagesSnapshot = await getDocs(messagesRef);
+      const deletePromises = messagesSnapshot.docs.map(doc => deleteDoc(doc.ref));
+      await Promise.all(deletePromises);
+      
+      // Then delete the chat document
+      await deleteDoc(doc(db, `chats/${id}`));
+      
+      console.log('✅ Chat completely deleted');
+      
+      // Navigate back to chat list
+      router.push('/');
+      
+    } catch (error) {
+      console.error('Error hard deleting chat:', error);
+      setError(`Failed to delete chat completely: ${error.message}`);
+    } finally {
+      setIsDeletingChat(false);
+      setShowDeleteConfirm(false);
+    }
+  };
+
+  /**
+   * Check if chat can be hard deleted
+   * Returns true if both users have soft-deleted or user is alone in chat
+   */
+  const canHardDelete = () => {
+    if (!chat || !user?.email) return false;
+    
+    const deletedBy = chat.deletedBy || {};
+    const users = chat.users || [];
+    
+    // If user is alone in chat, they can hard delete
+    if (users.length <= 1) return true;
+    
+    // Check if all users have soft-deleted
+    const allUsersDeleted = users.every(userEmail => {
+      const userKey = userEmail.replace('.', '_');
+      return deletedBy[userKey];
+    });
+    
+    return allUsersDeleted;
+  };
 
   const handleSend = async () => {
     const trimmedText = textBox?.trim() || '';
@@ -1221,12 +1339,12 @@ const ChatBox = () => {
     );
   }
 
-  // FIXED: Get current user's profile picture for message display (not header)
+  // Get current user's profile picture for message display (not header)
   const currentUserProfilePic = getUserProfilePicture(user, 32);
 
   return (
     <section className='bg-gray-100 dark:bg-gray-800 relative flex flex-col rounded-xl h-full shadow-lg w-full text-left'>
-      {/* FIXED Header - Shows OTHER user's profile picture and info */}
+      {/* Header - Shows OTHER user's profile picture and info */}
       <div className="flex justify-between items-center p-4 bg-white dark:bg-gray-700 rounded-t-xl border-b border-gray-200 dark:border-gray-600 sticky top-0 z-10">
         <div className="flex items-center gap-4">
           <button
@@ -1252,9 +1370,8 @@ const ChatBox = () => {
               />
             )}
 
-            {/* Online status indicator */}
-            <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-700 ${otherUserData?.isOnline ? 'bg-green-500' : 'bg-gray-400'
-              }`}></div>
+            {/* Online status indicator - now properly reflects real-time status */}
+            <div className={`absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 border-white dark:border-gray-700 ${isOtherUserOnline ? 'bg-green-500' : 'bg-gray-400'}`}></div>
           </div>
 
           <div>
@@ -1262,10 +1379,10 @@ const ChatBox = () => {
               {otherUserData?.displayName || otherUserEmail?.split('@')[0] || 'Unknown User'}
             </h1>
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              {otherUserData?.isOnline ? (
+              {isOtherUserOnline ? (
                 'Online'
-              ) : otherUserData?.lastSeen ? (
-                `Last seen ${new Date(otherUserData.lastSeen.toDate()).toLocaleString()}`
+              ) : lastSeen ? (
+                `Last seen ${new Date(lastSeen).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
               ) : (
                 'Offline'
               )}
@@ -1284,9 +1401,44 @@ const ChatBox = () => {
           />
           {showOptions && (
             <div className="absolute right-0 top-10 w-48 bg-white dark:bg-gray-700 rounded-lg shadow-xl py-1 z-20 border border-gray-200 dark:border-gray-600">
+              <button 
+                onClick={() => {
+                  setShowDeleteConfirm(true);
+                  setShowOptions(false);
+                }}
+                disabled={isDeletingChat}
+                className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 text-red-500 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isDeletingChat ? (
+                  <>
+                    <FontAwesomeIcon icon={faSpinner} className="animate-spin mr-2" />
+                    Deleting...
+                  </>
+                ) : (
+                  <>🗑️ Delete chat</>
+                )}
+              </button>
               
-              <button className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 text-red-500">
-                Delete chat
+              {canHardDelete() && (
+                <button 
+                  onClick={() => {
+                    setShowDeleteConfirm(true);
+                    setShowOptions(false);
+                  }}
+                  disabled={isDeletingChat}
+                  className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 text-red-600 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                >
+                  🗑️ Delete permanently
+                </button>
+              )}
+              
+              <div className="border-t border-gray-200 dark:border-gray-600 my-1"></div>
+              
+              <button 
+                onClick={() => setShowOptions(false)}
+                className="w-full text-left px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300"
+              >
+                Cancel
               </button>
             </div>
           )}
@@ -1531,6 +1683,83 @@ const ChatBox = () => {
           </div>
         </div>
       </div>
+
+      {/* Delete Confirmation Modal */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-12 h-12 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center">
+                🗑️
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-gray-800 dark:text-white">
+                  Delete Chat
+                </h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                  with {otherUserData?.displayName || otherUserEmail}
+                </p>
+              </div>
+            </div>
+            
+            <div className="mb-6">
+              <p className="text-gray-700 dark:text-gray-300 mb-3">
+                This will hide the chat from your chat list. The other person will still be able to see the conversation.
+              </p>
+              
+              {canHardDelete() && (
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3 mb-3">
+                  <p className="text-red-700 dark:text-red-300 text-sm font-medium mb-1">
+                    ⚠️ Permanent deletion available
+                  </p>
+                  <p className="text-red-600 dark:text-red-400 text-sm">
+                    Since both users have deleted this chat, you can permanently delete all messages. This cannot be undone.
+                  </p>
+                </div>
+              )}
+              
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                💡 You can always start a new conversation with this person later.
+              </p>
+            </div>
+            
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={isDeletingChat}
+                className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              
+              <button
+                onClick={handleSoftDeleteChat}
+                disabled={isDeletingChat}
+                className="flex-1 px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {isDeletingChat ? (
+                  <>
+                    <FontAwesomeIcon icon={faSpinner} className="animate-spin mr-2" />
+                    Deleting...
+                  </>
+                ) : (
+                  'Delete for Me'
+                )}
+              </button>
+              
+              {canHardDelete() && (
+                <button
+                  onClick={handleHardDeleteChat}
+                  disabled={isDeletingChat}
+                  className="flex-1 px-4 py-2 bg-red-700 hover:bg-red-800 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+                >
+                  Delete Forever
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 };
